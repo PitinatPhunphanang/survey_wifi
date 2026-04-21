@@ -8,9 +8,13 @@ build/
 .env
 .env.local
 .env.*.local
+postgres-data/
 .DS_Store
 __pycache__/
 *.pyc
 .venv/
 venv/
-node_modules
+node_modules/
+
+# Wi-Fi Survey Data
+*.xlsx

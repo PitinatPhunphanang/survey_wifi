@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SurveyEntry, DEFAULT_THRESHOLDS } from "@/types";
 import { evaluateEntry } from "@/lib/evaluation";
-import { LayoutDashboard, RefreshCw, Building2, Map as MapIcon, ChevronDown, ChevronRight, Activity, Printer } from "lucide-react";
+import { LayoutDashboard, RefreshCw, Building2, Map as MapIcon, ChevronDown, ChevronRight, Activity, Printer, Trash2 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LabelList, ReferenceLine, ComposedChart, Line
@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [traceData, setTraceData] = useState<any[]>([]);
   const [isClient, setIsClient] = useState(false);
   const [isLoadingDB, setIsLoadingDB] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   // Filter State
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
@@ -102,6 +103,51 @@ export default function Dashboard() {
       else next.add(bldg);
       return next;
     });
+  };
+
+  const handleDelete = async ({ building, floor }: { building: string; floor?: string }) => {
+    const scope = floor ? "floor" : "building";
+    const targetKey = floor ? `${building}::${floor}` : building;
+    const targetLabel = floor ? `ชั้น ${floor} ของตึก ${building}` : `ตึก ${building}`;
+
+    if (!window.confirm(`ต้องการลบข้อมูล${targetLabel}ออกจากฐานข้อมูลใช่หรือไม่?`)) {
+      return;
+    }
+
+    setDeleteTarget(targetKey);
+    try {
+      const response = await fetch("/api/survey", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          scope,
+          building,
+          floor,
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Delete failed");
+      }
+
+      if (selectedBuilding === building && (!floor || selectedFloor === floor)) {
+        setSelectedBuilding(null);
+        setSelectedFloor(null);
+        setSelectedTraceRoom("");
+      }
+
+      await fetchFromDatabase();
+      window.alert(`ลบข้อมูล${targetLabel}เรียบร้อยแล้ว (${payload.deletedCount ?? 0} รายการ)`);
+    } catch (error) {
+      console.error(error);
+      window.alert("ลบข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setDeleteTarget(null);
+    }
   };
 
   // ============================================
@@ -207,7 +253,7 @@ export default function Dashboard() {
 
               {Object.entries(hierarchy).map(([bldg, floors]) => (
                 <div key={bldg} className="pt-1">
-                  <div className="flex">
+                  <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
                       className="px-2 w-8 h-8"
@@ -227,15 +273,25 @@ export default function Dashboard() {
                       <Building2 className="w-4 h-4 mr-2 text-indigo-500" />
                       {bldg}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                      onClick={() => handleDelete({ building: bldg })}
+                      disabled={deleteTarget !== null}
+                      aria-label={`Delete building ${bldg}`}
+                    >
+                      <Trash2 className={`w-4 h-4 ${deleteTarget === bldg ? "animate-pulse" : ""}`} />
+                    </Button>
                   </div>
 
                   {expandedBuildings.has(bldg) && (
                     <div className="ml-8 mt-1 space-y-1 border-l-2 border-gray-100 dark:border-gray-800 pl-2">
                       {floors.map(fl => (
-                        <Button
-                          key={fl}
+                        <div key={fl} className="flex items-center gap-1">
+                          <Button
                           variant={selectedBuilding === bldg && selectedFloor === fl ? "secondary" : "ghost"}
-                          className="w-full justify-start text-xs h-8 text-gray-600 dark:text-gray-300"
+                          className="flex-1 justify-start text-xs h-8 text-gray-600 dark:text-gray-300"
                           onClick={() => {
                             setSelectedBuilding(bldg);
                             setSelectedFloor(fl);
@@ -243,7 +299,18 @@ export default function Dashboard() {
                         >
                           <MapIcon className="w-3.5 h-3.5 mr-2 opacity-70" />
                           ชั้น {fl}
-                        </Button>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                            onClick={() => handleDelete({ building: bldg, floor: fl })}
+                            disabled={deleteTarget !== null}
+                            aria-label={`Delete floor ${fl} in ${bldg}`}
+                          >
+                            <Trash2 className={`w-3.5 h-3.5 ${deleteTarget === `${bldg}::${fl}` ? "animate-pulse" : ""}`} />
+                          </Button>
+                        </div>
                       ))}
                     </div>
                   )}

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Unknown error';
+
 export async function GET() {
   try {
     const { rows } = await pool.query(`
@@ -30,10 +33,10 @@ export async function GET() {
     }));
 
     return NextResponse.json(formattedData);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Error fetching traces:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch traces', details: error.message },
+      { error: 'Failed to fetch traces', details: getErrorMessage(error) },
       { status: 500 }
     );
   }

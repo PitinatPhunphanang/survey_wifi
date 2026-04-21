@@ -55,8 +55,9 @@
 
 1. **รัน Database:**
    ```bash
-   docker-compose up -d
-   ```
+   เปิดdocker-compose up -d
+   ปิดdocker compose down
+   ```เระ
 2. **รัน Web Dashboard:**
    ```bash
    npm install   # (ทำเฉพาะครั้งแรก)

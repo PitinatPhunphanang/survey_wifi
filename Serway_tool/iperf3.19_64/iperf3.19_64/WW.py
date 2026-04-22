@@ -5,23 +5,25 @@ import re
 import subprocess
 import threading
 from datetime import datetime
+
 from dotenv import load_dotenv
 
 import customtkinter as ctk
 import pandas as pd
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 
 # Load .env from parent directories
 def find_and_load_env():
-    """Search for .env.local in parent directories and load it"""
+    """Search for .env.local in parent directories and load it."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     for _ in range(5):  # Check up to 5 parent directories
-        env_path = os.path.join(current_dir, '.env.local')
+        env_path = os.path.join(current_dir, ".env.local")
         if os.path.exists(env_path):
             load_dotenv(env_path)
             return
         current_dir = os.path.dirname(current_dir)
+
 
 find_and_load_env()
 
@@ -45,7 +47,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("❌ ERROR: Supabase credentials not found in .env.local")
     print("Make sure NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY are set")
-
 
 
 class WifiSurveyApp(ctk.CTk):
@@ -84,10 +85,12 @@ class WifiSurveyApp(ctk.CTk):
 
         ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(5, 2), pady=5, sticky="e")
         self.entry_server_ip = ctk.CTkEntry(ip_inner, width=150)
+        self.entry_server_ip.insert(0, SERVER_IP)
         self.entry_server_ip.grid(row=0, column=1, padx=2, pady=5)
 
         ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(15, 2), pady=5, sticky="e")
         self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=150)
+        self.entry_trace_ip.insert(0, SERVER_IP)
         self.entry_trace_ip.grid(row=0, column=3, padx=2, pady=5)
 
         ctk.CTkLabel(ip_inner, text="Diag Mode:").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="e")
@@ -667,76 +670,93 @@ class WifiSurveyApp(ctk.CTk):
     # =========================
     # DATABASE
     # =========================
+    def sanitize_db_value(self, value):
+        if pd.isna(value):
+            return None
+        return value
+
     def save_to_supabase(self, df_survey, df_trace):
-        """Save data to Supabase instead of PostgreSQL"""
+        """Save survey and traceroute data to Supabase."""
         try:
             if not SUPABASE_URL or not SUPABASE_KEY:
                 return False, "❌ Supabase credentials not configured. Check .env.local file."
-            
-            # Create Supabase client
+
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-            
-            # Insert survey data
-            for index, row in df_survey.iterrows():
+
+            for _, row in df_survey.iterrows():
+                floor_value = self.sanitize_db_value(row.get("Floor"))
+                room_value = self.sanitize_db_value(row.get("Room_Point"))
+                channel_value = self.sanitize_db_value(row.get("Channel"))
+
                 survey_data = {
-                    "survey_timestamp": row.get('Timestamp'),
-                    "building": row.get('Building'),
-                    "floor": row.get('Floor'),
-                    "room_point": row.get('Room_Point'),
-                    "note": row.get('Note'),
-                    "ssid": row.get('SSID'),
-                    "bssid": row.get('BSSID'),
-                    "band": row.get('Band'),
-                    "radio_type": row.get('Radio_Type'),
-                    "channel": row.get('Channel'),
-                    "signal_percent": row.get('Signal_%'),
-                    "rssi_dbm": row.get('RSSI_dBm'),
-                    "rx_rate_mbps": row.get('Receive_Rate_Mbps'),
-                    "tx_rate_mbps": row.get('Transmit_Rate_Mbps'),
-                    "gateway_ip": row.get('Gateway_IP'),
-                    "ping_gateway_ms": row.get('Ping_Gateway_ms'),
-                    "ping_gateway_loss_percent": row.get('Ping_Gateway_Loss_%'),
-                    "server_ip": row.get('Server_IP'),
-                    "trace_target": row.get('Trace_Target'),
-                    "ping_server_ms": row.get('Ping_Server_ms'),
-                    "ping_server_loss_percent": row.get('Ping_Server_Loss_%'),
-                    "tcp_upload_mbps": row.get('TCP_Upload_Mbps'),
-                    "tcp_download_mbps": row.get('TCP_Download_Mbps'),
-                    "udp_target_bandwidth": row.get('UDP_Target_Bandwidth'),
-                    "udp_actual_mbps": row.get('UDP_Actual_Mbps'),
-                    "udp_jitter_ms": row.get('UDP_Jitter_ms'),
-                    "udp_loss_percent": row.get('UDP_PacketLoss_%'),
+                    "survey_timestamp": self.sanitize_db_value(row.get("Timestamp")),
+                    "building": self.sanitize_db_value(row.get("Building")),
+                    "floor": str(floor_value) if floor_value is not None else None,
+                    "room_point": str(room_value) if room_value is not None else None,
+                    "note": self.sanitize_db_value(row.get("Note")),
+                    "ssid": self.sanitize_db_value(row.get("SSID")),
+                    "bssid": self.sanitize_db_value(row.get("BSSID")),
+                    "band": self.sanitize_db_value(row.get("Band")),
+                    "radio_type": self.sanitize_db_value(row.get("Radio_Type")),
+                    "channel": str(channel_value) if channel_value is not None else None,
+                    "signal_percent": self.sanitize_db_value(row.get("Signal_%")),
+                    "rssi_dbm": self.sanitize_db_value(row.get("RSSI_dBm")),
+                    "receive_rate_mbps": self.sanitize_db_value(row.get("Receive_Rate_Mbps")),
+                    "transmit_rate_mbps": self.sanitize_db_value(row.get("Transmit_Rate_Mbps")),
+                    "gateway_ip": self.sanitize_db_value(row.get("Gateway_IP")),
+                    "ping_gateway_ms": self.sanitize_db_value(row.get("Ping_Gateway_ms")),
+                    "ping_gateway_loss_pct": self.sanitize_db_value(row.get("Ping_Gateway_Loss_%")),
+                    "server_ip": self.sanitize_db_value(row.get("Server_IP")),
+                    "trace_target": self.sanitize_db_value(row.get("Trace_Target")),
+                    "ping_server_ms": self.sanitize_db_value(row.get("Ping_Server_ms")),
+                    "ping_server_loss_pct": self.sanitize_db_value(row.get("Ping_Server_Loss_%")),
+                    "tcp_upload_mbps": self.sanitize_db_value(row.get("TCP_Upload_Mbps")),
+                    "tcp_download_mbps": self.sanitize_db_value(row.get("TCP_Download_Mbps")),
+                    "udp_target_bandwidth": self.sanitize_db_value(row.get("UDP_Target_Bandwidth")),
+                    "udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
+                    "udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
+                    "udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
+                    "rating": self.sanitize_db_value(row.get("Rating")),
                 }
-                
-                # Insert survey and get ID
+
                 response = supabase.table("surveys").insert(survey_data).execute()
-                
-                if not response.data:
-                    return False, f"Failed to insert survey data: {response}"
-                
-                survey_id = response.data[0]['id']
-                
-                # Insert trace data for this survey
+
+                if not getattr(response, "data", None):
+                    return False, f"❌ Failed to insert survey data: {response}"
+
+                survey_id = response.data[0]["id"]
+
                 if df_trace is not None and not df_trace.empty:
-                    for t_idx, t_row in df_trace.iterrows():
-                        trace_data = {
-                            "survey_id": survey_id,
-                            "hop": t_row.get('Hop'),
-                            "hostname": t_row.get('Hostname'),
-                            "ip": t_row.get('IP'),
-                            "loss_percent": t_row.get('Loss_%'),
-                            "rtt1_ms": t_row.get('RTT1'),
-                            "rtt2_ms": t_row.get('RTT2'),
-                            "rtt3_ms": t_row.get('RTT3'),
-                            "min_ms": t_row.get('Min_ms'),
-                            "max_ms": t_row.get('Max_ms'),
-                            "avg_ms": t_row.get('Avg_ms'),
-                        }
-                        
-                        supabase.table("traceroute_hops").insert(trace_data).execute()
-            
+                    trace_rows = []
+                    for _, t_row in df_trace.iterrows():
+                        trace_floor = self.sanitize_db_value(t_row.get("Floor"))
+                        trace_room = self.sanitize_db_value(t_row.get("Room_Point"))
+                        hop_value = self.sanitize_db_value(t_row.get("Hop"))
+
+                        trace_rows.append(
+                            {
+                                "survey_id": survey_id,
+                                "survey_timestamp": self.sanitize_db_value(t_row.get("Timestamp")),
+                                "building": self.sanitize_db_value(t_row.get("Building")),
+                                "floor": str(trace_floor) if trace_floor is not None else None,
+                                "room_point": str(trace_room) if trace_room is not None else None,
+                                "hop": int(hop_value) if hop_value is not None else None,
+                                "ip": self.sanitize_db_value(t_row.get("IP")),
+                                "loss_pct": self.sanitize_db_value(t_row.get("Loss_%")),
+                                "min_ms": self.sanitize_db_value(t_row.get("Min_ms")),
+                                "max_ms": self.sanitize_db_value(t_row.get("Max_ms")),
+                                "avg_ms": self.sanitize_db_value(t_row.get("Avg_ms")),
+                            }
+                        )
+
+                    if trace_rows:
+                        trace_response = supabase.table("traceroute_hops").insert(trace_rows).execute()
+                        if getattr(trace_response, "data", None) is None:
+                            return False, f"❌ Failed to insert trace data: {trace_response}"
+
             return True, "✅ Saved to Supabase successfully!"
         except Exception as e:
+            print("SUPABASE ERROR:", e)
             return False, f"❌ Supabase Error: {str(e)}"
 
     # =========================

@@ -13,7 +13,110 @@ import {
 } from "recharts";
 
 const safeNum = (val: any) => (isNaN(Number(val)) || val === "" || val === null ? 0 : Number(val));
+const pointLabel = (entry: Pick<SurveyEntry, "room" | "note">) => {
+  const room = entry.room?.trim() || "Unknown";
+  const note = entry.note?.trim();
+  return note ? `${room} • ${note}` : room;
+};
 
+type RoomSummary = {
+  room: string;
+  pointCount: number;
+  avgRssi: number;
+  avgPing: number;
+  avgDownload: number;
+  avgUpload: number;
+  avgJitter: number;
+  avgLoss: number;
+  worstRssi: number;
+  worstPing: number;
+  lowestDownload: number;
+  latestTimestamp: string;
+  points: SurveyEntry[];
+};
+
+const average = (values: number[]) => {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (valid.length === 0) return 0;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+};
+
+const buildRoomSummaries = (rows: SurveyEntry[]): RoomSummary[] => {
+  const grouped = new Map<string, SurveyEntry[]>();
+
+  rows.forEach((row) => {
+    const room = row.room?.trim() || "Unknown";
+    if (!grouped.has(room)) grouped.set(room, []);
+    grouped.get(room)!.push(row);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([room, points]) => ({
+      room,
+      pointCount: points.length,
+      avgRssi: average(points.map((point) => safeNum(point.rssi))),
+      avgPing: average(points.map((point) => safeNum(point.pingServerMs))),
+      avgDownload: average(points.map((point) => safeNum(point.tcpDownload))),
+      avgUpload: average(points.map((point) => safeNum(point.tcpUpload))),
+      avgJitter: average(points.map((point) => safeNum(point.udpJitter))),
+      avgLoss: average(points.map((point) => safeNum(point.udpLoss))),
+      worstRssi: Math.min(...points.map((point) => safeNum(point.rssi))),
+      worstPing: Math.max(...points.map((point) => safeNum(point.pingServerMs))),
+      lowestDownload: Math.min(...points.map((point) => safeNum(point.tcpDownload))),
+      latestTimestamp: points
+        .map((point) => point.timestamp || "")
+        .sort()
+        .slice(-1)[0] || "",
+      points,
+    }))
+    .sort((a, b) => a.room.localeCompare(b.room, undefined, { numeric: true, sensitivity: "base" }));
+};
+const mapSurveyRow = (row: any): SurveyEntry => ({
+  id: String(row.id ?? ""),
+  timestamp: row.survey_timestamp ?? row.created_at ?? "",
+  building: row.building ?? "",
+  floor: String(row.floor ?? ""),
+  room: String(row.room_point ?? ""),
+  note: row.note ?? "",
+  ssid: row.ssid ?? "",
+  bssid: row.bssid ?? "",
+  band: row.band ?? "",
+  radioType: row.radio_type ?? "",
+  channel: String(row.channel ?? ""),
+  signalPercent: safeNum(row.signal_percent),
+  rssi: safeNum(row.rssi_dbm),
+  rxRate: safeNum(row.receive_rate_mbps),
+  txRate: safeNum(row.transmit_rate_mbps),
+  gatewayIp: row.gateway_ip ?? "",
+  pingGatewayMs: safeNum(row.ping_gateway_ms),
+  pingGatewayLoss: safeNum(row.ping_gateway_loss_pct),
+  pingServerMs: safeNum(row.ping_server_ms),
+  pingLoss: safeNum(row.ping_server_loss_pct),
+  tcpUpload: safeNum(row.tcp_upload_mbps),
+  tcpDownload: safeNum(row.tcp_download_mbps),
+  udpTarget: row.udp_target_bandwidth ?? "",
+  udpActual: safeNum(row.udp_actual_mbps),
+  udpJitter: safeNum(row.udp_jitter_ms),
+  udpLoss: safeNum(row.udp_packetloss_pct),
+});
+
+const mapTraceRow = (row: any) => ({
+  survey_id: row.survey_id,
+  survey_timestamp: row.survey_timestamp ?? "",
+  Building: row.building ?? "",
+  Floor: String(row.floor ?? ""),
+  Room_Point: String(row.room_point ?? ""),
+  Hop: String(row.hop ?? ""),
+  IP: row.ip ?? "",
+  Hostname: "",
+  RTT1: "*",
+  RTT2: "*",
+  RTT3: "*",
+  Min_ms: row.min_ms ?? null,
+  Max_ms: row.max_ms ?? null,
+  Avg_ms: row.avg_ms ?? null,
+  ["Loss_%"]: row.loss_pct ?? 0,
+});
 export default function Dashboard() {
   const [history, setHistory] = useState<SurveyEntry[]>([]);
   const [traceData, setTraceData] = useState<any[]>([]);
@@ -25,9 +128,10 @@ export default function Dashboard() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<string | null>(null);
   const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
-  
+
   // Traceroute room selection within a floor
   const [selectedTraceRoom, setSelectedTraceRoom] = useState<string>("");
+  const [selectedRoomSummary, setSelectedRoomSummary] = useState<string>("");
 
   const fetchFromDatabase = async () => {
     setIsLoadingDB(true);
@@ -36,16 +140,24 @@ export default function Dashboard() {
         fetch('/api/survey'),
         fetch('/api/trace')
       ]);
+
       if (resSurvey.ok) {
         const data = await resSurvey.json();
-        setHistory(data || []);
+        setHistory(Array.isArray(data) ? data.map(mapSurveyRow) : []);
+      } else {
+        setHistory([]);
       }
+
       if (resTrace.ok) {
         const data = await resTrace.json();
-        setTraceData(data || []);
+        setTraceData(Array.isArray(data) ? data.map(mapTraceRow) : []);
+      } else {
+        setTraceData([]);
       }
     } catch (err) {
       console.error(err);
+      setHistory([]);
+      setTraceData([]);
     } finally {
       setIsLoadingDB(false);
     }
@@ -77,6 +189,17 @@ export default function Dashboard() {
     return result;
   }, [history]);
 
+  useEffect(() => {
+    if (!selectedBuilding && Object.keys(hierarchy).length > 0) {
+      const firstBuilding = Object.keys(hierarchy)[0];
+      const firstFloor = hierarchy[firstBuilding]?.[0] ?? null;
+
+      setSelectedBuilding(firstBuilding);
+      setSelectedFloor(firstFloor);
+      setExpandedBuildings(new Set([firstBuilding]));
+    }
+  }, [hierarchy, selectedBuilding]);
+
   // Active entries for the selected floor
   const entries = useMemo(() => {
     if (!selectedBuilding || !selectedFloor) return [];
@@ -87,6 +210,12 @@ export default function Dashboard() {
     });
   }, [history, selectedBuilding, selectedFloor]);
 
+  const roomSummaries = useMemo(() => buildRoomSummaries(entries), [entries]);
+
+  const selectedRoomDetails = useMemo(() => {
+    return roomSummaries.find((room) => room.room === selectedRoomSummary) ?? null;
+  }, [roomSummaries, selectedRoomSummary]);
+
   // Auto-select the first room for traceroute when floor changes
   useEffect(() => {
     if (entries.length > 0) {
@@ -95,6 +224,16 @@ export default function Dashboard() {
       setSelectedTraceRoom("");
     }
   }, [entries]);
+
+  useEffect(() => {
+    if (roomSummaries.length > 0) {
+      setSelectedRoomSummary((prev) =>
+        prev && roomSummaries.some((room) => room.room === prev) ? prev : roomSummaries[0].room
+      );
+    } else {
+      setSelectedRoomSummary("");
+    }
+  }, [roomSummaries]);
 
   const toggleBuilding = (bldg: string) => {
     setExpandedBuildings(prev => {
@@ -170,11 +309,11 @@ export default function Dashboard() {
     { name: "POOR", value: poorCount, color: "#ef4444" }
   ].filter(d => d.value > 0);
 
-  const rssiData = [...entries].map(e => ({ name: e.room, rssi: safeNum(e.rssi) })).sort((a, b) => a.rssi - b.rssi);
-  const throughputData = entries.map(e => ({ name: e.room, Download: safeNum(e.tcpDownload), Upload: safeNum(e.tcpUpload) }));
-  const pingData = entries.map(e => ({ name: e.room, ping: safeNum(e.pingServerMs) }));
-  const jitterData = entries.map(e => ({ name: e.room, jitter: safeNum(e.udpJitter) }));
-  const lossData = entries.map(e => ({ name: e.room, udpLoss: safeNum(e.udpLoss), pingLoss: safeNum(e.pingLoss) }));
+  const rssiData = [...entries].map(e => ({ name: pointLabel(e), rssi: safeNum(e.rssi) })).sort((a, b) => a.rssi - b.rssi);
+  const throughputData = entries.map(e => ({ name: pointLabel(e), Download: safeNum(e.tcpDownload), Upload: safeNum(e.tcpUpload) }));
+  const pingData = entries.map(e => ({ name: pointLabel(e), ping: safeNum(e.pingServerMs) }));
+  const jitterData = entries.map(e => ({ name: pointLabel(e), jitter: safeNum(e.udpJitter) }));
+  const lossData = entries.map(e => ({ name: pointLabel(e), udpLoss: safeNum(e.udpLoss), pingLoss: safeNum(e.pingLoss) }));
 
   const bandCounts = entries.reduce((acc, curr) => {
     const band = curr.band ? curr.band.toUpperCase() : "UNKNOWN";
@@ -187,7 +326,7 @@ export default function Dashboard() {
   }));
 
   const sortedRssi = [...entries].sort((a, b) => safeNum(a.rssi) - safeNum(b.rssi));
-  const worstRssi = sortedRssi.slice(0, 3).map(e => ({ room: e.room, val: e.rssi }));
+  const worstRssi = sortedRssi.slice(0, 3).map(e => ({ room: pointLabel(e), val: e.rssi }));
   const worstPing = [...entries].sort((a, b) => safeNum(b.pingServerMs) - safeNum(a.pingServerMs))[0];
   const worstJitter = [...entries].sort((a, b) => safeNum(b.udpJitter) - safeNum(a.udpJitter))[0];
   const worstLoss = [...entries].sort((a, b) => Math.max(safeNum(b.udpLoss), safeNum(b.pingLoss)) - Math.max(safeNum(a.udpLoss), safeNum(a.pingLoss)))[0];
@@ -204,7 +343,7 @@ export default function Dashboard() {
 
     if (avgJitter < 30) summary.push(`ค่าความแกว่งของสัญญาณ (Jitter) ต่ำ เหมาะสมกับการใช้งาน VDO Conference และ Voice Call`);
     else summary.push(`ค่า Jitter ค่อนข้างสูง อาจทำให้ภาพหรือเสียงกระตุกระหว่างประชุมออนไลน์`);
-    
+
     if (avgTcpDown > 100) summary.push(`ความเร็ว Download ทำได้ดีเยี่ยม (เฉลี่ย ${avgTcpDown.toFixed(1)} Mbps) รองรับการใช้งานหนาแน่นได้สบาย`);
     else if (avgTcpDown < 20) summary.push(`ความเร็ว Download ค่อนข้างต่ำ ควรตรวจสอบ Bandwidth ของฝั่ง Gateway หรือข้อจำกัดของอุปกรณ์`);
     return summary;
@@ -219,7 +358,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans">
-      
+
       {/* Sidebar Navigation */}
       <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col print:hidden">
         <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
@@ -234,7 +373,7 @@ export default function Dashboard() {
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           <div className="space-y-2">
             <Button onClick={fetchFromDatabase} variant="default" className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-md" disabled={isLoadingDB}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDB ? 'animate-spin' : ''}`}/> 
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDB ? 'animate-spin' : ''}`} />
               {isLoadingDB ? "กำลังซิงค์..." : "ดึงข้อมูลล่าสุด"}
             </Button>
           </div>
@@ -242,8 +381,8 @@ export default function Dashboard() {
           <div>
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">สถานที่</h2>
             <div className="space-y-1">
-              <Button 
-                variant={!selectedBuilding ? "secondary" : "ghost"} 
+              <Button
+                variant={!selectedBuilding ? "secondary" : "ghost"}
                 className="w-full justify-start text-sm"
                 onClick={() => { setSelectedBuilding(null); setSelectedFloor(null); }}
               >
@@ -259,13 +398,13 @@ export default function Dashboard() {
                       className="px-2 w-8 h-8"
                       onClick={() => toggleBuilding(bldg)}
                     >
-                      {expandedBuildings.has(bldg) ? <ChevronDown className="w-4 h-4"/> : <ChevronRight className="w-4 h-4"/>}
+                      {expandedBuildings.has(bldg) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </Button>
-                    <Button 
-                      variant={selectedBuilding === bldg && !selectedFloor ? "secondary" : "ghost"} 
+                    <Button
+                      variant={selectedBuilding === bldg && !selectedFloor ? "secondary" : "ghost"}
                       className="flex-1 justify-start text-sm font-medium px-2 h-8"
-                      onClick={() => { 
-                        setSelectedBuilding(bldg); 
+                      onClick={() => {
+                        setSelectedBuilding(bldg);
                         setSelectedFloor(null);
                         setExpandedBuildings(prev => new Set(prev).add(bldg));
                       }}
@@ -290,15 +429,15 @@ export default function Dashboard() {
                       {floors.map(fl => (
                         <div key={fl} className="flex items-center gap-1">
                           <Button
-                          variant={selectedBuilding === bldg && selectedFloor === fl ? "secondary" : "ghost"}
-                          className="flex-1 justify-start text-xs h-8 text-gray-600 dark:text-gray-300"
-                          onClick={() => {
-                            setSelectedBuilding(bldg);
-                            setSelectedFloor(fl);
-                          }}
-                        >
-                          <MapIcon className="w-3.5 h-3.5 mr-2 opacity-70" />
-                          ชั้น {fl}
+                            variant={selectedBuilding === bldg && selectedFloor === fl ? "secondary" : "ghost"}
+                            className="flex-1 justify-start text-xs h-8 text-gray-600 dark:text-gray-300"
+                            onClick={() => {
+                              setSelectedBuilding(bldg);
+                              setSelectedFloor(fl);
+                            }}
+                          >
+                            <MapIcon className="w-3.5 h-3.5 mr-2 opacity-70" />
+                            ชั้น {fl}
                           </Button>
                           <Button
                             variant="ghost"
@@ -322,14 +461,14 @@ export default function Dashboard() {
 
         <div className="p-4 border-t border-gray-200 dark:border-gray-800">
           <Button onClick={() => window.print()} variant="outline" className="w-full justify-start text-sm">
-            <Printer className="w-4 h-4 mr-2"/> พิมพ์รายงาน
+            <Printer className="w-4 h-4 mr-2" /> พิมพ์รายงาน
           </Button>
         </div>
       </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        
+
         {/* Top Header */}
         <header className="flex-shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-8 py-4 flex items-center justify-between print:hidden">
           <div>
@@ -344,7 +483,7 @@ export default function Dashboard() {
 
         {/* Dashboard Area */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 bg-gray-50 dark:bg-gray-950">
-          
+
           {(!selectedBuilding || !selectedFloor) ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
               <Activity className="w-16 h-16 opacity-20" />
@@ -422,14 +561,14 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
                       <span className="text-sm font-medium text-gray-600 dark:text-gray-300">เลือกจุดทดสอบ:</span>
-                      <select 
+                      <select
                         className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
                         value={selectedTraceRoom}
                         onChange={(e) => setSelectedTraceRoom(e.target.value)}
                       >
                         <option value="">-- เลือก --</option>
-                        {entries.map(e => (
-                          <option key={e.room} value={e.room}>{e.room}</option>
+                        {Array.from(new Set(entries.map(e => e.room))).map(room => (
+                          <option key={room} value={room}>{room}</option>
                         ))}
                       </select>
                     </div>
@@ -438,36 +577,36 @@ export default function Dashboard() {
                   {currentTrace.length > 0 ? (
                     <>
                       <TraceRouteSummary currentTrace={currentTrace} />
-                      
+
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <Card className="shadow-sm border-gray-200 dark:border-gray-800">
-                            <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
-                              <CardTitle className="text-base">สถานะการเชื่อมต่อ (Timeline)</CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-4 overflow-y-auto max-h-[700px]">
-                              <TraceRouteTimeline data={currentTrace} />
-                            </CardContent>
+                          <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
+                            <CardTitle className="text-base">สถานะการเชื่อมต่อ (Timeline)</CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-4 overflow-y-auto max-h-[700px]">
+                            <TraceRouteTimeline data={currentTrace} />
+                          </CardContent>
                         </Card>
 
                         <div className="space-y-6 flex flex-col">
-                            <Card className="shadow-sm border-gray-200 dark:border-gray-800 flex-1">
-                              <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
-                                <CardTitle className="text-base">ช่วงความหน่วงเวลาแต่ละจุด (Latency Range)</CardTitle>
-                              </CardHeader>
-                              <CardContent className="pt-4 h-[300px]">
-                                <TraceRouteLatencyChart data={currentTrace} />
-                              </CardContent>
-                            </Card>
+                          <Card className="shadow-sm border-gray-200 dark:border-gray-800 flex-1">
+                            <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
+                              <CardTitle className="text-base">ช่วงความหน่วงเวลาแต่ละจุด (Latency Range)</CardTitle>
+                            </CardHeader>
+                            <CardContent className="pt-4 h-[300px]">
+                              <TraceRouteLatencyChart data={currentTrace} />
+                            </CardContent>
+                          </Card>
 
-                            <Card className="shadow-sm border-gray-200 dark:border-gray-800 flex-1">
-                              <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
-                                <CardTitle className="text-base">อัตราข้อมูลสูญหายแต่ละจุด (Packet Loss)</CardTitle>
-                                <p className="text-xs text-gray-500 mt-1">(Loss ระหว่างทางอาจไม่ใช่ปัญหาของปลายทางเสมอไป)</p>
-                              </CardHeader>
-                              <CardContent className="pt-4 h-[250px]">
-                                <TraceRouteLossChart data={currentTrace} />
-                              </CardContent>
-                            </Card>
+                          <Card className="shadow-sm border-gray-200 dark:border-gray-800 flex-1">
+                            <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
+                              <CardTitle className="text-base">อัตราข้อมูลสูญหายแต่ละจุด (Packet Loss)</CardTitle>
+                              <p className="text-xs text-gray-500 mt-1">(Loss ระหว่างทางอาจไม่ใช่ปัญหาของปลายทางเสมอไป)</p>
+                            </CardHeader>
+                            <CardContent className="pt-4 h-[250px]">
+                              <TraceRouteLossChart data={currentTrace} />
+                            </CardContent>
+                          </Card>
                         </div>
                       </div>
 
@@ -574,13 +713,13 @@ export default function Dashboard() {
                         <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} angle={-45} textAnchor="end" height={60} interval={0} />
                         <YAxis stroke="#94a3b8" fontSize={12} />
                         <Tooltip cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }} />
-                        <Legend verticalAlign="top" height={36}/>
+                        <Legend verticalAlign="top" height={36} />
                         <ReferenceLine y={50} stroke="#10b981" strokeDasharray="4 4" label={{ position: 'insideTopLeft', value: 'Good (50 Mbps)', fill: '#10b981', fontSize: 12 }} />
                         <Bar dataKey="Download" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                           <LabelList dataKey="Download" position="top" fill="#10b981" fontSize={10} fontWeight="bold" />
+                          <LabelList dataKey="Download" position="top" fill="#10b981" fontSize={10} fontWeight="bold" />
                         </Bar>
                         <Bar dataKey="Upload" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                           <LabelList dataKey="Upload" position="top" fill="#3b82f6" fontSize={10} fontWeight="bold" />
+                          <LabelList dataKey="Upload" position="top" fill="#3b82f6" fontSize={10} fontWeight="bold" />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -626,7 +765,7 @@ export default function Dashboard() {
                           <Tooltip cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }} />
                           <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="4 4" label={{ position: 'insideTopLeft', value: 'Good (< 30 ms)', fill: '#f59e0b', fontSize: 12 }} />
                           <Bar dataKey="jitter" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                             <LabelList dataKey="jitter" position="top" fill="#f97316" fontSize={11} fontWeight="bold" />
+                            <LabelList dataKey="jitter" position="top" fill="#f97316" fontSize={11} fontWeight="bold" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -648,7 +787,7 @@ export default function Dashboard() {
                         <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} angle={-45} textAnchor="end" height={60} interval={0} />
                         <YAxis stroke="#94a3b8" fontSize={12} />
                         <Tooltip cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }} />
-                        <Legend verticalAlign="top" height={36}/>
+                        <Legend verticalAlign="top" height={36} />
                         <ReferenceLine y={1} stroke="#ef4444" strokeDasharray="4 4" label={{ position: 'insideTopLeft', value: 'Good (< 1%)', fill: '#ef4444', fontSize: 12 }} />
                         <Bar dataKey="udpLoss" name="UDP Loss (%)" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={40}>
                           <LabelList dataKey="udpLoss" position="top" fill="#ef4444" fontSize={11} fontWeight="bold" />
@@ -661,6 +800,110 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Floor Data Tables */}
+              <div className="space-y-6 pt-2 print:break-inside-avoid">
+                <Card className="shadow-sm border-gray-200 dark:border-gray-800 overflow-hidden">
+                  <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
+                    <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <CardTitle className="text-base">ตารางสรุปผลรายห้อง</CardTitle>
+                        <p className="text-sm text-gray-500 mt-1">รวมค่าเฉลี่ยของทุกจุดที่วัดภายในห้องเดียวกัน โดยใช้ room_point เป็นชื่อห้อง และ note เป็นจุดย่อย</p>
+                      </div>
+                      <Badge variant="outline" className="w-fit">{roomSummaries.length} ห้อง / {entries.length} จุด</Badge>
+                    </div>
+                  </CardHeader>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left whitespace-nowrap">
+                      <thead className="text-xs text-gray-500 bg-gray-50 dark:bg-gray-900/80 dark:text-gray-400 uppercase border-b dark:border-gray-800">
+                        <tr>
+                          <th className="px-4 py-3">ห้อง</th>
+                          <th className="px-4 py-3">จำนวนจุด</th>
+                          <th className="px-4 py-3">AVG RSSI</th>
+                          <th className="px-4 py-3">AVG Ping</th>
+                          <th className="px-4 py-3">AVG Down</th>
+                          <th className="px-4 py-3">AVG Up</th>
+                          <th className="px-4 py-3">AVG Jitter</th>
+                          <th className="px-4 py-3">AVG Loss</th>
+                          <th className="px-4 py-3">จุดแย่สุด</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roomSummaries.map((room) => (
+                          <tr
+                            key={room.room}
+                            className={`border-b dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50 cursor-pointer ${selectedRoomSummary === room.room ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}
+                            onClick={() => setSelectedRoomSummary(room.room)}
+                          >
+                            <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">{room.room}</td>
+                            <td className="px-4 py-3">{room.pointCount}</td>
+                            <td className={`px-4 py-3 font-medium ${room.avgRssi < -75 ? "text-red-500" : room.avgRssi < -67 ? "text-amber-500" : "text-emerald-500"}`}>{room.avgRssi.toFixed(1)} dBm</td>
+                            <td className="px-4 py-3">{room.avgPing.toFixed(1)} ms</td>
+                            <td className="px-4 py-3">{room.avgDownload.toFixed(1)} Mbps</td>
+                            <td className="px-4 py-3">{room.avgUpload.toFixed(1)} Mbps</td>
+                            <td className="px-4 py-3">{room.avgJitter.toFixed(1)} ms</td>
+                            <td className="px-4 py-3">{room.avgLoss.toFixed(1)}%</td>
+                            <td className="px-4 py-3 text-xs text-gray-500">RSSI {room.worstRssi.toFixed(1)} / Ping {room.worstPing.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {selectedRoomDetails && (
+                  <Card className="shadow-sm border-gray-200 dark:border-gray-800 overflow-hidden">
+                    <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
+                      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <CardTitle className="text-base">ตารางจุดย่อยในห้อง {selectedRoomDetails.room}</CardTitle>
+                          <p className="text-sm text-gray-500 mt-1">ใช้ note เป็นชื่อจุดทดสอบ เช่น ใต้โต๊ะ / ริมหน้าต่าง / ข้างห้องน้ำ</p>
+                        </div>
+                        <Badge variant="secondary" className="w-fit">{selectedRoomDetails.pointCount} จุด</Badge>
+                      </div>
+                    </CardHeader>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left whitespace-nowrap">
+                        <thead className="text-xs text-gray-500 bg-gray-50 dark:bg-gray-900/80 dark:text-gray-400 uppercase border-b dark:border-gray-800">
+                          <tr>
+                            <th className="px-4 py-3">เวลา</th>
+                            <th className="px-4 py-3">จุดทดสอบ</th>
+                            <th className="px-4 py-3">SSID</th>
+                            <th className="px-4 py-3">RSSI</th>
+                            <th className="px-4 py-3">Ping</th>
+                            <th className="px-4 py-3">Down</th>
+                            <th className="px-4 py-3">Up</th>
+                            <th className="px-4 py-3">Jitter</th>
+                            <th className="px-4 py-3">Loss</th>
+                            <th className="px-4 py-3">Rating</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedRoomDetails.points.map((point) => {
+                            const report = evaluateEntry(point, DEFAULT_THRESHOLDS);
+                            const rating = report.overallRating;
+                            const badgeClass = rating === "GOOD" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : rating === "FAIR" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
+                            return (
+                              <tr key={point.id} className="border-b dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
+                                <td className="px-4 py-3 text-xs text-gray-500">{point.timestamp || "-"}</td>
+                                <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{point.note || point.room}</td>
+                                <td className="px-4 py-3">{point.ssid || "-"}</td>
+                                <td className="px-4 py-3">{safeNum(point.rssi).toFixed(1)} dBm</td>
+                                <td className="px-4 py-3">{safeNum(point.pingServerMs).toFixed(1)} ms</td>
+                                <td className="px-4 py-3">{safeNum(point.tcpDownload).toFixed(1)} Mbps</td>
+                                <td className="px-4 py-3">{safeNum(point.tcpUpload).toFixed(1)} Mbps</td>
+                                <td className="px-4 py-3">{safeNum(point.udpJitter).toFixed(1)} ms</td>
+                                <td className="px-4 py-3">{safeNum(point.udpLoss).toFixed(1)}%</td>
+                                <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>{rating}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                )}
+              </div>
 
             </>
           )}
@@ -696,7 +939,7 @@ function TraceRouteSummary({ currentTrace }: { currentTrace: any[] }) {
 
   const validHops = hops.filter(h => safeNum(h.Avg_ms) > 0);
   const worstHopAvg = validHops.length > 0 ? [...validHops].sort((a, b) => safeNum(b.Avg_ms) - safeNum(a.Avg_ms))[0] : null;
-  
+
   const timeoutsCount = hops.filter(h => h.IP === "Timeout" || h.IP === "Unknown" || h.IP === "Unreachable" || safeNum(h["Loss_%"]) === 100).length;
 
   return (
@@ -730,22 +973,22 @@ function TraceRouteTimeline({ data }: { data: any[] }) {
   return (
     <div className="flex flex-col space-y-0 py-2 pl-2 relative max-w-3xl mx-auto">
       <div className="absolute top-6 bottom-6 left-[27px] w-0.5 bg-gray-200 dark:bg-gray-700 z-0"></div>
-      
+
       {hops.map((hop, i) => {
         const status = getHopStatus(hop);
         const avg = hop.Avg_ms || "-";
         const max = hop.Max_ms || "-";
-        
+
         return (
           <div key={i} className="flex items-start z-10 relative group pb-4 last:pb-0">
             <div className="w-14 flex-shrink-0 text-right pr-4 pt-2.5">
               <span className="text-xs font-bold text-gray-400 dark:text-gray-500">Hop {hop.Hop}</span>
             </div>
-            
+
             <div className="flex flex-col items-center mr-4 pt-2.5">
               <div className={`w-3.5 h-3.5 rounded-full ring-4 ${status.color} shadow-sm z-10`}></div>
             </div>
-            
+
             <div className="flex-1 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 shadow-sm hover:shadow-md transition-all group-hover:border-indigo-200 dark:group-hover:border-indigo-800">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                 <div>
@@ -755,7 +998,7 @@ function TraceRouteTimeline({ data }: { data: any[] }) {
                   <div className={`text-xs font-semibold ${status.textColor}`}>{status.label}</div>
                   {hop.Hostname && <div className="text-[10px] text-gray-400 truncate max-w-[200px]" title={hop.Hostname}>{hop.Hostname}</div>}
                 </div>
-                
+
                 {status.label !== "Timeout" && status.label !== "No ICMP Reply" && (
                   <div className="flex gap-4 text-xs">
                     <div className="flex flex-col sm:items-end">
@@ -781,10 +1024,10 @@ function TraceRouteLatencyChart({ data }: { data: any[] }) {
   const chartData = data
     .filter(h => h.Avg_ms && h.IP !== "Timeout" && h.IP !== "Unknown")
     .map(h => ({
-       hop: `Hop ${h.Hop}`,
-       Avg: safeNum(h.Avg_ms),
-       Min: safeNum(h.Min_ms),
-       Max: safeNum(h.Max_ms)
+      hop: `Hop ${h.Hop}`,
+      Avg: safeNum(h.Avg_ms),
+      Min: safeNum(h.Min_ms),
+      Max: safeNum(h.Max_ms)
     }));
 
   if (chartData.length === 0) return <div className="flex justify-center items-center h-full text-gray-400 text-sm">No valid latency data to display.</div>;
@@ -809,11 +1052,11 @@ function TraceRouteLossChart({ data }: { data: any[] }) {
   const chartData = data
     .filter(h => h.IP !== "Timeout" && h.IP !== "Unknown" && h.IP !== "Unreachable")
     .map(h => {
-       const loss = h["Loss_%"] !== null && h["Loss_%"] !== "" ? Number(h["Loss_%"]) : 0;
-       return {
-         hop: `Hop ${h.Hop}`,
-         loss: loss
-       };
+      const loss = h["Loss_%"] !== null && h["Loss_%"] !== "" ? Number(h["Loss_%"]) : 0;
+      return {
+        hop: `Hop ${h.Hop}`,
+        loss: loss
+      };
     });
 
   if (chartData.length === 0) return <div className="flex justify-center items-center h-full text-gray-400 text-sm">No packet loss data available.</div>;
@@ -826,7 +1069,7 @@ function TraceRouteLossChart({ data }: { data: any[] }) {
         <YAxis stroke="#94a3b8" fontSize={11} domain={[0, 100]} />
         <Tooltip cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }} contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }} />
         <Bar dataKey="loss" name="Packet Loss (%)" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={40}>
-           <LabelList dataKey="loss" position="top" fill="#f97316" fontSize={10} formatter={(v: any) => Number(v) > 0 ? `${v}%` : ''} />
+          <LabelList dataKey="loss" position="top" fill="#f97316" fontSize={10} formatter={(v: any) => Number(v) > 0 ? `${v}%` : ''} />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -857,7 +1100,7 @@ function TraceRouteTable({ data }: { data: any[] }) {
         {hops.map((hop, i) => {
           const status = getHopStatus(hop);
           const loss = hop["Loss_%"] !== null && hop["Loss_%"] !== "" && hop["Loss_%"] !== undefined ? `${hop["Loss_%"]}%` : "-";
-          
+
           return (
             <tr key={i} className="border-b dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
               <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{hop.Hop}</td>

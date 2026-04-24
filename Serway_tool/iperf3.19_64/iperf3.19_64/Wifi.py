@@ -4,24 +4,30 @@ import os
 import re
 import subprocess
 import threading
+import time
 from datetime import datetime
+
 from dotenv import load_dotenv
 
 import customtkinter as ctk
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import pandas as pd
-from supabase import create_client, Client
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from supabase import Client, create_client
 
 
 # Load .env from parent directories
 def find_and_load_env():
-    """Search for .env.local in parent directories and load it"""
+    """Search for .env.local in parent directories and load it."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     for _ in range(5):  # Check up to 5 parent directories
-        env_path = os.path.join(current_dir, '.env.local')
+        env_path = os.path.join(current_dir, ".env.local")
         if os.path.exists(env_path):
             load_dotenv(env_path)
             return
         current_dir = os.path.dirname(current_dir)
+
 
 find_and_load_env()
 
@@ -38,6 +44,13 @@ TRACERT_TIMEOUT = 500
 APP_TITLE = "Wi-Fi Survey Excel Pro v6"
 DEFAULT_SHEET_NAME = "Raw_Data"
 
+# Spectrum / image config
+SPECTRUM_IMAGE_ROOT = "Survey_Data"
+SPECTRUM_IMAGE_DIRNAME = "Spectrum_Images"
+SPECTRUM_CACHE_TIMEOUT = 60
+SPECTRUM_REFRESH_MS = 10000
+COLOR_CYCLE = list(mcolors.TABLEAU_COLORS.values()) + list(mcolors.CSS4_COLORS.values())
+
 # SUPABASE CONFIG
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
@@ -47,59 +60,77 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     print("Make sure NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY are set")
 
 
-
 class WifiSurveyApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title(APP_TITLE)
-        self.geometry("640x950")
+        self.geometry("1600x900")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.iperf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iperf3.exe")
         self._test_running = False
 
+        # Spectrum-related cache
+        self.wifi_cache = {}
+        self.ssid_colors = {}
+
         self._build_ui()
+        self.after(1000, self.update_spectrum_preview)
 
     # =========================
     # UI
     # =========================
     def _build_ui(self):
-        ctk.CTkLabel(self, text="Wi-Fi Survey Pro", font=("Arial", 24, "bold")).pack(pady=(20, 2))
+        top_wrap = ctk.CTkFrame(self, fg_color="transparent")
+        top_wrap.pack(fill="both", expand=True, padx=20, pady=15)
+
+        left_panel = ctk.CTkFrame(top_wrap)
+        left_panel.pack(side="left", fill="both", padx=(0, 10))
+        left_panel.pack_propagate(False)
+        left_panel.configure(width=500)
+
+        right_panel = ctk.CTkFrame(top_wrap)
+        right_panel.pack(side="left", fill="both", expand=True, padx=(10, 0))
+
+        # LEFT SIDE
+        ctk.CTkLabel(left_panel, text="Wi-Fi Survey Pro", font=("Arial", 24, "bold")).pack(pady=(20, 2))
         ctk.CTkLabel(
-            self,
+            left_panel,
             text=f"iPerf: {IPERF_DURATION}s | UDP: {UDP_BANDWIDTH} | Port: {IPERF_PORT}",
             font=("Arial", 11),
             text_color="gray",
         ).pack(pady=(0, 10))
 
-        net_frame = ctk.CTkFrame(self)
+        net_frame = ctk.CTkFrame(left_panel)
         net_frame.pack(padx=20, pady=5, fill="x")
 
         ctk.CTkLabel(net_frame, text="Network Settings", font=("Arial", 13, "bold")).pack(pady=(10, 0))
 
         ip_inner = ctk.CTkFrame(net_frame, fg_color="transparent")
-        ip_inner.pack(pady=5, fill="x", padx=10)
+        ip_inner.pack(pady=5, fill="x", padx=5)
 
-        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(5, 2), pady=5, sticky="e")
-        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(3, 2), pady=5, sticky="e")
+        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=100)
+        self.entry_server_ip.insert(0, SERVER_IP)
         self.entry_server_ip.grid(row=0, column=1, padx=2, pady=5)
 
-        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(15, 2), pady=5, sticky="e")
-        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(0, 2), pady=5, sticky="e")
+        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=100)
+        self.entry_trace_ip.insert(0, SERVER_IP)
         self.entry_trace_ip.grid(row=0, column=3, padx=2, pady=5)
 
         ctk.CTkLabel(ip_inner, text="Diag Mode:").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="e")
         self.combo_diag_mode = ctk.CTkComboBox(
             ip_inner,
-            values=["Quick (IP, 5 Pings)", "Detailed (Host, 10 Pings)"],
+            values=["Quick Network Trace (IP, 5 Pings)", "Detailed Network Trace (Host, 10 Pings)"],
             width=150,
         )
-        self.combo_diag_mode.set("Quick (IP, 5 Pings)")
+        self.combo_diag_mode.set("Quick Network Trace (IP, 5 Pings)")
         self.combo_diag_mode.grid(row=1, column=1, padx=2, pady=5)
 
-        input_frame = ctk.CTkFrame(self)
+        input_frame = ctk.CTkFrame(left_panel)
         input_frame.pack(padx=20, pady=5, fill="x")
 
         ctk.CTkLabel(input_frame, text="Survey Details", font=("Arial", 13, "bold")).pack(pady=(10, 5))
@@ -120,7 +151,7 @@ class WifiSurveyApp(ctk.CTk):
         )
         self.entry_note.pack(pady=(5, 12))
 
-        btn_frame = ctk.CTkFrame(self)
+        btn_frame = ctk.CTkFrame(left_panel)
         btn_frame.pack(padx=20, pady=8, fill="x")
 
         self.btn_test = ctk.CTkButton(
@@ -145,18 +176,36 @@ class WifiSurveyApp(ctk.CTk):
         )
         self.btn_clear.pack(side="left", padx=10, pady=10, expand=True, fill="x")
 
-        self.status_label = ctk.CTkLabel(self, text="Ready", text_color="gray", font=("Arial", 12))
+        self.status_label = ctk.CTkLabel(left_panel, text="Ready", text_color="gray", font=("Arial", 12))
         self.status_label.pack(pady=2)
 
-        self.result_box = ctk.CTkTextbox(self, width=560, height=450, font=("Courier New", 12))
-        self.result_box.pack(pady=10, padx=20)
+        self.result_box = ctk.CTkTextbox(left_panel, width=560, height=300, font=("Courier New", 12))
+        self.result_box.pack(pady=10, padx=20, fill="both", expand=True)
 
         ctk.CTkLabel(
-            self,
+            left_panel,
             text="One building = one workbook. Raw data and traceroute are saved in separate sheets.",
             font=("Arial", 10),
             text_color="gray",
         ).pack(pady=(0, 12))
+
+        # RIGHT SIDE - SPECTRUM
+        ctk.CTkLabel(right_panel, text="Spectrum Preview", font=("Arial", 20, "bold")).pack(pady=(20, 6))
+        ctk.CTkLabel(
+            right_panel,
+            text="Live nearby Wi-Fi channels and signal levels",
+            font=("Arial", 11),
+            text_color="gray",
+        ).pack(pady=(0, 8))
+
+        self.spectrum_frame = ctk.CTkFrame(right_panel)
+        self.spectrum_frame.pack(padx=15, pady=10, fill="both", expand=True)
+
+        self.fig, self.ax = plt.subplots(figsize=(11, 8), dpi=100)
+        self.fig.patch.set_facecolor("#0d1117")
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.spectrum_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
 
     # =========================
     # UI HELPERS
@@ -180,6 +229,13 @@ class WifiSurveyApp(ctk.CTk):
     def _set_result_text_ui(self, text):
         self.result_box.delete("0.0", "end")
         self.result_box.insert("0.0", text)
+
+    def append_result_text(self, text):
+        self.run_on_ui(self._append_result_text_ui, text)
+
+    def _append_result_text_ui(self, text):
+        self.result_box.insert("end", text)
+        self.result_box.see("end")
 
     def set_testing_state(self, running):
         self.run_on_ui(self._set_testing_state_ui, running)
@@ -511,6 +567,194 @@ class WifiSurveyApp(ctk.CTk):
         return hops
 
     # =========================
+    # SPECTRUM / WIFI SCAN
+    # =========================
+    def scan_wifi_live(self):
+        """
+        Scan nearby Wi-Fi and cache nearby AP info for spectrum drawing.
+        Saved locally only. Not sent to Supabase.
+        """
+        now = time.time()
+
+        try:
+            self.run_command(["netsh", "wlan", "scan"], timeout=10)
+            time.sleep(1.5)
+
+            result = self.run_command(
+                ["netsh", "wlan", "show", "networks", "mode=bssid"],
+                timeout=15,
+            )
+            out = result.stdout
+
+            blocks = re.findall(r"SSID\s+\d+\s*:.*?(?=\nSSID|\Z)", out, re.S)
+
+            for block in blocks:
+                ssid_match = re.search(r"SSID\s+\d+\s*:\s*(.*)", block)
+                ssid = ssid_match.group(1).strip() if ssid_match else "Hidden"
+
+                bss_list = re.findall(
+                    r"BSSID\s+\d+\s*:\s*([0-9a-f:]+).*?"
+                    r"Signal\s*:\s*(\d+)%.*?"
+                    r"(?:Band\s*:\s*([\d.]+)\s*GHz)?.*?"
+                    r"Channel\s*:\s*(\d+)",
+                    block,
+                    re.S | re.I,
+                )
+
+                for mac, sig, band, ch in bss_list:
+                    try:
+                        ch_int = int(ch)
+                    except Exception:
+                        continue
+
+                    if band:
+                        band_val = float(band)
+                    else:
+                        band_val = 5.0 if ch_int > 14 else 2.4
+
+                    rssi = round((int(sig) / 2) - 100, 1)
+
+                    self.wifi_cache[mac.lower()] = {
+                        "ssid": ssid if ssid else "Hidden",
+                        "band": band_val,
+                        "ch": ch_int,
+                        "rssi": rssi,
+                        "updated": now,
+                    }
+
+            for key in list(self.wifi_cache.keys()):
+                if now - self.wifi_cache[key]["updated"] > SPECTRUM_CACHE_TIMEOUT:
+                    del self.wifi_cache[key]
+
+        except Exception:
+            pass
+
+        return self.wifi_cache
+
+    def analyze_channel_quality(self, connected_channel):
+        same_channel = 0
+        overlap_channel = 0
+        strongest_neighbor = -100
+
+        for ap in self.wifi_cache.values():
+            ch = ap["ch"]
+            rssi = ap["rssi"]
+
+            if rssi > strongest_neighbor:
+                strongest_neighbor = rssi
+
+            if ch == connected_channel:
+                same_channel += 1
+
+            if connected_channel <= 14:
+                if abs(ch - connected_channel) <= 2 and ch != connected_channel:
+                    overlap_channel += 1
+
+        return {
+            "CoChannel_AP_Count": same_channel,
+            "Adjacent_AP_Count": overlap_channel,
+            "Strongest_Neighbor_RSSI": strongest_neighbor,
+        }
+
+    def _render_spectrum(self, ax):
+        ax.clear()
+        ax.set_facecolor("#0d1117")
+
+        active_wifi = [n for n in self.wifi_cache.values() if n["rssi"] > -90]
+        real_max_ch = max([n["ch"] for n in active_wifi], default=14)
+        display_max = max(32, real_max_ch + 5)
+
+        ax.set_xlim(0, display_max)
+        ax.set_ylim(-90, -10)
+        ax.grid(True, alpha=0.15, color="white", linestyle=":")
+        ax.tick_params(colors="white", labelsize=9)
+        ax.set_title("Wi-Fi Spectrum Analyzer", color="white", fontsize=12, weight="bold")
+        ax.set_xlabel("Channel", color="white")
+        ax.set_ylabel("Signal (dBm)", color="white")
+
+        for spine in ax.spines.values():
+            spine.set_color("#666666")
+
+        rssi_levels = {}
+
+        for net in sorted(active_wifi, key=lambda x: x["rssi"]):
+            ssid = net["ssid"]
+            rssi = net["rssi"]
+            ch = net["ch"]
+            band = net["band"]
+
+            if ssid not in self.ssid_colors:
+                self.ssid_colors[ssid] = COLOR_CYCLE[len(self.ssid_colors) % len(COLOR_CYCLE)]
+
+            color = self.ssid_colors[ssid]
+
+            width = 2.2 if band < 3.0 else 5.0
+            x_pts = [ch - width, ch - width / 2, ch + width / 2, ch + width]
+            y_pts = [-90, rssi, rssi, -90]
+
+            ax.plot(x_pts, y_pts, color=color, linewidth=2, alpha=0.85)
+            ax.fill_between(x_pts, -90, y_pts, color=color, alpha=0.15)
+
+            offset = rssi_levels.get(ch, 0)
+            label_ssid = ssid if ssid else "Hidden"
+            ax.text(
+                ch,
+                rssi + 1 + offset,
+                f"{label_ssid}\n{rssi}dBm",
+                color=color,
+                fontsize=8,
+                ha="center",
+                va="bottom",
+                weight="bold",
+            )
+            rssi_levels[ch] = offset + 8
+
+        if display_max > 20:
+            ax.text(display_max * 0.10, -15, "2.4GHz Zone", color="gray", alpha=0.6, ha="center", weight="bold")
+            ax.text(display_max * 0.70, -15, "5GHz Zone", color="gray", alpha=0.6, ha="center", weight="bold")
+
+        if not active_wifi:
+            ax.text(
+                0.5,
+                0.5,
+                "No nearby Wi-Fi data yet",
+                transform=ax.transAxes,
+                color="gray",
+                fontsize=12,
+                ha="center",
+                va="center",
+            )
+
+    def draw_spectrum_on_canvas(self):
+        if not hasattr(self, "ax") or not hasattr(self, "canvas"):
+            return
+
+        self._render_spectrum(self.ax)
+        self.canvas.draw_idle()
+
+    def draw_spectrum_to_file(self, save_path):
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
+        fig.patch.set_facecolor("#0d1117")
+        self._render_spectrum(ax)
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, facecolor="#0d1117", bbox_inches="tight", dpi=120)
+        plt.close(fig)
+
+    def update_spectrum_preview(self):
+        if self._test_running:
+            self.after(3000, self.update_spectrum_preview)
+            return
+
+        try:
+            self.scan_wifi_live()
+            self.draw_spectrum_on_canvas()
+        except Exception:
+            pass
+
+        self.after(SPECTRUM_REFRESH_MS, self.update_spectrum_preview)
+
+    # =========================
     # IPERF
     # =========================
     def run_iperf(self, server_ip, args, label):
@@ -667,76 +911,93 @@ class WifiSurveyApp(ctk.CTk):
     # =========================
     # DATABASE
     # =========================
+    def sanitize_db_value(self, value):
+        if pd.isna(value):
+            return None
+        return value
+
     def save_to_supabase(self, df_survey, df_trace):
-        """Save data to Supabase instead of PostgreSQL"""
+        """Save survey and traceroute data to Supabase."""
         try:
             if not SUPABASE_URL or not SUPABASE_KEY:
                 return False, "❌ Supabase credentials not configured. Check .env.local file."
-            
-            # Create Supabase client
+
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-            
-            # Insert survey data
-            for index, row in df_survey.iterrows():
+
+            for _, row in df_survey.iterrows():
+                floor_value = self.sanitize_db_value(row.get("Floor"))
+                room_value = self.sanitize_db_value(row.get("Room_Point"))
+                channel_value = self.sanitize_db_value(row.get("Channel"))
+
                 survey_data = {
-                    "survey_timestamp": row.get('Timestamp'),
-                    "building": row.get('Building'),
-                    "floor": row.get('Floor'),
-                    "room_point": row.get('Room_Point'),
-                    "note": row.get('Note'),
-                    "ssid": row.get('SSID'),
-                    "bssid": row.get('BSSID'),
-                    "band": row.get('Band'),
-                    "radio_type": row.get('Radio_Type'),
-                    "channel": row.get('Channel'),
-                    "signal_percent": row.get('Signal_%'),
-                    "rssi_dbm": row.get('RSSI_dBm'),
-                    "rx_rate_mbps": row.get('Receive_Rate_Mbps'),
-                    "tx_rate_mbps": row.get('Transmit_Rate_Mbps'),
-                    "gateway_ip": row.get('Gateway_IP'),
-                    "ping_gateway_ms": row.get('Ping_Gateway_ms'),
-                    "ping_gateway_loss_percent": row.get('Ping_Gateway_Loss_%'),
-                    "server_ip": row.get('Server_IP'),
-                    "trace_target": row.get('Trace_Target'),
-                    "ping_server_ms": row.get('Ping_Server_ms'),
-                    "ping_server_loss_percent": row.get('Ping_Server_Loss_%'),
-                    "tcp_upload_mbps": row.get('TCP_Upload_Mbps'),
-                    "tcp_download_mbps": row.get('TCP_Download_Mbps'),
-                    "udp_target_bandwidth": row.get('UDP_Target_Bandwidth'),
-                    "udp_actual_mbps": row.get('UDP_Actual_Mbps'),
-                    "udp_jitter_ms": row.get('UDP_Jitter_ms'),
-                    "udp_loss_percent": row.get('UDP_PacketLoss_%'),
+                    "survey_timestamp": self.sanitize_db_value(row.get("Timestamp")),
+                    "building": self.sanitize_db_value(row.get("Building")),
+                    "floor": str(floor_value) if floor_value is not None else None,
+                    "room_point": str(room_value) if room_value is not None else None,
+                    "note": self.sanitize_db_value(row.get("Note")),
+                    "ssid": self.sanitize_db_value(row.get("SSID")),
+                    "bssid": self.sanitize_db_value(row.get("BSSID")),
+                    "band": self.sanitize_db_value(row.get("Band")),
+                    "radio_type": self.sanitize_db_value(row.get("Radio_Type")),
+                    "channel": str(channel_value) if channel_value is not None else None,
+                    "signal_percent": self.sanitize_db_value(row.get("Signal_%")),
+                    "rssi_dbm": self.sanitize_db_value(row.get("RSSI_dBm")),
+                    "receive_rate_mbps": self.sanitize_db_value(row.get("Receive_Rate_Mbps")),
+                    "transmit_rate_mbps": self.sanitize_db_value(row.get("Transmit_Rate_Mbps")),
+                    "gateway_ip": self.sanitize_db_value(row.get("Gateway_IP")),
+                    "ping_gateway_ms": self.sanitize_db_value(row.get("Ping_Gateway_ms")),
+                    "ping_gateway_loss_pct": self.sanitize_db_value(row.get("Ping_Gateway_Loss_%")),
+                    "server_ip": self.sanitize_db_value(row.get("Server_IP")),
+                    "trace_target": self.sanitize_db_value(row.get("Trace_Target")),
+                    "ping_server_ms": self.sanitize_db_value(row.get("Ping_Server_ms")),
+                    "ping_server_loss_pct": self.sanitize_db_value(row.get("Ping_Server_Loss_%")),
+                    "tcp_upload_mbps": self.sanitize_db_value(row.get("TCP_Upload_Mbps")),
+                    "tcp_download_mbps": self.sanitize_db_value(row.get("TCP_Download_Mbps")),
+                    "udp_target_bandwidth": self.sanitize_db_value(row.get("UDP_Target_Bandwidth")),
+                    "udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
+                    "udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
+                    "udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
+                    "rating": self.sanitize_db_value(row.get("Rating")),
                 }
-                
-                # Insert survey and get ID
+
                 response = supabase.table("surveys").insert(survey_data).execute()
-                
-                if not response.data:
-                    return False, f"Failed to insert survey data: {response}"
-                
-                survey_id = response.data[0]['id']
-                
-                # Insert trace data for this survey
+
+                if not getattr(response, "data", None):
+                    return False, f"❌ Failed to insert survey data: {response}"
+
+                survey_id = response.data[0]["id"]
+
                 if df_trace is not None and not df_trace.empty:
-                    for t_idx, t_row in df_trace.iterrows():
-                        trace_data = {
-                            "survey_id": survey_id,
-                            "hop": t_row.get('Hop'),
-                            "hostname": t_row.get('Hostname'),
-                            "ip": t_row.get('IP'),
-                            "loss_percent": t_row.get('Loss_%'),
-                            "rtt1_ms": t_row.get('RTT1'),
-                            "rtt2_ms": t_row.get('RTT2'),
-                            "rtt3_ms": t_row.get('RTT3'),
-                            "min_ms": t_row.get('Min_ms'),
-                            "max_ms": t_row.get('Max_ms'),
-                            "avg_ms": t_row.get('Avg_ms'),
-                        }
-                        
-                        supabase.table("traceroute_hops").insert(trace_data).execute()
-            
+                    trace_rows = []
+                    for _, t_row in df_trace.iterrows():
+                        trace_floor = self.sanitize_db_value(t_row.get("Floor"))
+                        trace_room = self.sanitize_db_value(t_row.get("Room_Point"))
+                        hop_value = self.sanitize_db_value(t_row.get("Hop"))
+
+                        trace_rows.append(
+                            {
+                                "survey_id": survey_id,
+                                "survey_timestamp": self.sanitize_db_value(t_row.get("Timestamp")),
+                                "building": self.sanitize_db_value(t_row.get("Building")),
+                                "floor": str(trace_floor) if trace_floor is not None else None,
+                                "room_point": str(trace_room) if trace_room is not None else None,
+                                "hop": int(hop_value) if hop_value is not None else None,
+                                "ip": self.sanitize_db_value(t_row.get("IP")),
+                                "loss_pct": self.sanitize_db_value(t_row.get("Loss_%")),
+                                "min_ms": self.sanitize_db_value(t_row.get("Min_ms")),
+                                "max_ms": self.sanitize_db_value(t_row.get("Max_ms")),
+                                "avg_ms": self.sanitize_db_value(t_row.get("Avg_ms")),
+                            }
+                        )
+
+                    if trace_rows:
+                        trace_response = supabase.table("traceroute_hops").insert(trace_rows).execute()
+                        if getattr(trace_response, "data", None) is None:
+                            return False, f"❌ Failed to insert trace data: {trace_response}"
+
             return True, "✅ Saved to Supabase successfully!"
         except Exception as e:
+            print("SUPABASE ERROR:", e)
             return False, f"❌ Supabase Error: {str(e)}"
 
     # =========================
@@ -837,6 +1098,34 @@ class WifiSurveyApp(ctk.CTk):
         except Exception:
             tracert_hops = []
 
+        self.set_status("Scanning nearby Wi-Fi for spectrum...", "cyan")
+        self.scan_wifi_live()
+        self.run_on_ui(self.draw_spectrum_on_canvas)
+
+        try:
+            connected_channel = int(str(wlan["Channel"]).strip())
+            channel_quality = self.analyze_channel_quality(connected_channel)
+        except Exception:
+            channel_quality = {
+                "CoChannel_AP_Count": 0,
+                "Adjacent_AP_Count": 0,
+                "Strongest_Neighbor_RSSI": -100,
+            }
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        preferred_file_name = f"{self.safe_filename(bldg)}.xlsx"
+        output_file_name = self.resolve_output_file(preferred_file_name)
+
+        base_dir = os.path.join(SPECTRUM_IMAGE_ROOT, self.safe_filename(bldg))
+        img_dir = os.path.join(base_dir, SPECTRUM_IMAGE_DIRNAME)
+        os.makedirs(img_dir, exist_ok=True)
+
+        image_name = f"{self.safe_filename(bldg)}_{self.safe_filename(floor)}_{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        image_path = os.path.join(img_dir, image_name)
+
+        self.set_status("Saving spectrum image to local disk...", "cyan")
+        self.draw_spectrum_to_file(image_path)
+
         rating = self.rate_result(
             wlan["RSSI_dBm"],
             upload_mbps,
@@ -844,10 +1133,6 @@ class WifiSurveyApp(ctk.CTk):
             packet_loss_pct,
             ping_srv_ms,
         )
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        preferred_file_name = f"{self.safe_filename(bldg)}.xlsx"
-        output_file_name = self.resolve_output_file(preferred_file_name)
 
         new_data = {
             "Timestamp": [timestamp],
@@ -877,6 +1162,11 @@ class WifiSurveyApp(ctk.CTk):
             "UDP_Actual_Mbps": [udp_mbps],
             "UDP_Jitter_ms": [jitter_ms],
             "UDP_PacketLoss_%": [packet_loss_pct],
+            "CoChannel_AP_Count": [channel_quality["CoChannel_AP_Count"]],
+            "Adjacent_AP_Count": [channel_quality["Adjacent_AP_Count"]],
+            "Strongest_Neighbor_RSSI": [channel_quality["Strongest_Neighbor_RSSI"]],
+            "Spectrum_Image": [image_name],
+            "Spectrum_Image_Path": [image_path],
             "Rating": [rating],
         }
         df = pd.DataFrame(new_data)
@@ -936,6 +1226,9 @@ class WifiSurveyApp(ctk.CTk):
             "tracert_hops": tracert_hops,
             "file_name": output_file_name,
             "db_status": db_status_text,
+            "image_name": image_name,
+            "image_path": image_path,
+            "channel_quality": channel_quality,
         }
 
     def _handle_test_success(self, result):
@@ -964,6 +1257,8 @@ class WifiSurveyApp(ctk.CTk):
         udp_loss_display = (
             f"{result['packet_loss_pct']}%" if result["packet_loss_pct"] is not None else "N/A"
         )
+        cq = result.get("channel_quality", {})
+
         result_text = (
             f"{'=' * 58}\n"
             f"  Saved file      : {result['file_name']}\n"
@@ -990,6 +1285,11 @@ class WifiSurveyApp(ctk.CTk):
             f"  UDP Actual      : {udp_actual_display}\n"
             f"  UDP Jitter      : {udp_jitter_display}\n"
             f"  UDP Loss        : {udp_loss_display}\n"
+            f"{'-' * 58}\n"
+            f"  Co-Channel APs  : {cq.get('CoChannel_AP_Count', 0)}\n"
+            f"  Adjacent APs    : {cq.get('Adjacent_AP_Count', 0)}\n"
+            f"  Strongest AP    : {cq.get('Strongest_Neighbor_RSSI', -100)} dBm\n"
+            f"  Spectrum Image  : {result.get('image_path', '-')}\n"
             f"{'-' * 58}\n"
             f"{trace_str}"
             f"  Rating          : {result['rating']}\n"

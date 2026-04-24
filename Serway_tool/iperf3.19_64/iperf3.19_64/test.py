@@ -65,7 +65,7 @@ class WifiSurveyApp(ctk.CTk):
         super().__init__()
 
         self.title(APP_TITLE)
-        self.geometry("1300x900")
+        self.geometry("1600x900")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
@@ -87,7 +87,9 @@ class WifiSurveyApp(ctk.CTk):
         top_wrap.pack(fill="both", expand=True, padx=20, pady=15)
 
         left_panel = ctk.CTkFrame(top_wrap)
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        left_panel.pack(side="left", fill="both", padx=(0, 10))
+        left_panel.pack_propagate(False)
+        left_panel.configure(width=500)
 
         right_panel = ctk.CTkFrame(top_wrap)
         right_panel.pack(side="left", fill="both", expand=True, padx=(10, 0))
@@ -107,25 +109,25 @@ class WifiSurveyApp(ctk.CTk):
         ctk.CTkLabel(net_frame, text="Network Settings", font=("Arial", 13, "bold")).pack(pady=(10, 0))
 
         ip_inner = ctk.CTkFrame(net_frame, fg_color="transparent")
-        ip_inner.pack(pady=5, fill="x", padx=10)
+        ip_inner.pack(pady=5, fill="x", padx=5)
 
-        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(5, 2), pady=5, sticky="e")
-        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(3, 2), pady=5, sticky="e")
+        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=100)
         self.entry_server_ip.insert(0, SERVER_IP)
         self.entry_server_ip.grid(row=0, column=1, padx=2, pady=5)
 
-        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(15, 2), pady=5, sticky="e")
-        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(0, 2), pady=5, sticky="e")
+        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=100)
         self.entry_trace_ip.insert(0, SERVER_IP)
         self.entry_trace_ip.grid(row=0, column=3, padx=2, pady=5)
 
         ctk.CTkLabel(ip_inner, text="Diag Mode:").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="e")
         self.combo_diag_mode = ctk.CTkComboBox(
             ip_inner,
-            values=["Quick (IP, 5 Pings)", "Detailed (Host, 10 Pings)"],
+            values=["Quick Network Trace (IP, 5 Pings)", "Detailed Network Trace (Host, 10 Pings)"],
             width=150,
         )
-        self.combo_diag_mode.set("Quick (IP, 5 Pings)")
+        self.combo_diag_mode.set("Quick Network Trace (IP, 5 Pings)")
         self.combo_diag_mode.grid(row=1, column=1, padx=2, pady=5)
 
         input_frame = ctk.CTkFrame(left_panel)
@@ -199,7 +201,7 @@ class WifiSurveyApp(ctk.CTk):
         self.spectrum_frame = ctk.CTkFrame(right_panel)
         self.spectrum_frame.pack(padx=15, pady=10, fill="both", expand=True)
 
-        self.fig, self.ax = plt.subplots(figsize=(7, 6), dpi=100)
+        self.fig, self.ax = plt.subplots(figsize=(11, 8), dpi=100)
         self.fig.patch.set_facecolor("#0d1117")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.spectrum_frame)
@@ -1118,7 +1120,7 @@ class WifiSurveyApp(ctk.CTk):
         img_dir = os.path.join(base_dir, SPECTRUM_IMAGE_DIRNAME)
         os.makedirs(img_dir, exist_ok=True)
 
-        image_name = f"{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        image_name = f"{self.safe_filename(bldg)}_{self.safe_filename(floor)}_{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         image_path = os.path.join(img_dir, image_name)
 
         self.set_status("Saving spectrum image to local disk...", "cyan")

@@ -1113,12 +1113,17 @@ class WifiSurveyApp(ctk.CTk):
             }
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        preferred_file_name = f"{self.safe_filename(bldg)}.xlsx"
-        output_file_name = self.resolve_output_file(preferred_file_name)
 
+        # Save outputs under the building folder:
+        # Excel: Survey_Data/<Building>/<Building>.xlsx
+        # Images: Survey_Data/<Building>/Spectrum_Images/<image>.png
         base_dir = os.path.join(SPECTRUM_IMAGE_ROOT, self.safe_filename(bldg))
         img_dir = os.path.join(base_dir, SPECTRUM_IMAGE_DIRNAME)
+        os.makedirs(base_dir, exist_ok=True)
         os.makedirs(img_dir, exist_ok=True)
+
+        preferred_file_name = os.path.join(base_dir, f"{self.safe_filename(bldg)}.xlsx")
+        output_file_name = self.resolve_output_file(preferred_file_name)
 
         image_name = f"{self.safe_filename(bldg)}_{self.safe_filename(floor)}_{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         image_path = os.path.join(img_dir, image_name)

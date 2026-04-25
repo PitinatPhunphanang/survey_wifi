@@ -46,7 +46,18 @@ const mapSurveyRow = (row: any): RawSurveyEntry => ({
   udpLoss: safeNum(row.udp_packetloss_pct),
 });
 
-type SortField = "timestamp" | "building" | "room" | "point" | "rssi" | "tcpDownload" | "udpJitter";
+type SortField =
+  | "timestamp"
+  | "building"
+  | "floor"
+  | "room"
+  | "point"
+  | "note"
+  | "rssi"
+  | "tcpDownload"
+  | "tcpUpload"
+  | "udpJitter"
+  | "udpLoss";
 type SortOrder = "asc" | "desc";
 
 export default function SearchPage() {
@@ -61,6 +72,7 @@ export default function SearchPage() {
   const [searchPoint, setSearchPoint] = useState("");
   const [searchSSID, setSearchSSID] = useState("");
   const [searchBand, setSearchBand] = useState<"All" | "2.4GHz" | "5GHz" | "6GHz">("All");
+  const [searchRating, setSearchRating] = useState<"All" | "GOOD" | "FAIR" | "POOR">("All");
   const [searchDateFrom, setSearchDateFrom] = useState("");
   const [searchDateTo, setSearchDateTo] = useState("");
 
@@ -101,6 +113,8 @@ export default function SearchPage() {
       const matchRoom = !searchRoom || entry.room.toLowerCase().includes(searchRoom.toLowerCase());
       const matchPoint = !searchPoint || entry.point.toLowerCase().includes(searchPoint.toLowerCase());
       const matchSSID = !searchSSID || entry.ssid.toLowerCase().includes(searchSSID.toLowerCase());
+      const entryRating = evaluateEntry(entry, DEFAULT_THRESHOLDS).overallRating;
+      const matchRating = searchRating === "All" || entryRating === searchRating;
       
       let matchBand = true;
       if (searchBand !== "All") {
@@ -120,9 +134,9 @@ export default function SearchPage() {
         matchDate = matchDate && entryDate <= toDate;
       }
 
-      return matchBuilding && matchFloor && matchRoom && matchPoint && matchSSID && matchBand && matchDate;
+      return matchBuilding && matchFloor && matchRoom && matchPoint && matchSSID && matchBand && matchRating && matchDate;
     });
-  }, [allData, searchBuilding, searchFloor, searchRoom, searchPoint, searchSSID, searchBand, searchDateFrom, searchDateTo]);
+  }, [allData, searchBuilding, searchFloor, searchRoom, searchPoint, searchSSID, searchBand, searchRating, searchDateFrom, searchDateTo]);
 
   // Sort data
   const sortedData = useMemo(() => {
@@ -134,6 +148,20 @@ export default function SearchPage() {
       if (sortField === "timestamp") {
         aVal = new Date(a.timestamp).getTime();
         bVal = new Date(b.timestamp).getTime();
+      }
+
+      if (["floor", "note"].includes(sortField)) {
+        const aNum = Number(aVal);
+        const bNum = Number(bVal);
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+          aVal = aNum;
+          bVal = bNum;
+        }
+      }
+
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        const result = aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: "base" });
+        return sortOrder === "asc" ? result : -result;
       }
 
       if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
@@ -285,6 +313,20 @@ export default function SearchPage() {
                 </div>
 
                 <div>
+                  <label className="text-sm font-medium mb-1 block">Rating</label>
+                  <select
+                    value={searchRating}
+                    onChange={(e) => setSearchRating(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="All">ทั้งหมด</option>
+                    <option value="GOOD">GOOD</option>
+                    <option value="FAIR">FAIR</option>
+                    <option value="POOR">POOR</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="text-sm font-medium mb-1 block">วันที่เริ่มต้น</label>
                   <input
                     type="datetime-local"
@@ -313,6 +355,7 @@ export default function SearchPage() {
                       setSearchPoint("");
                       setSearchSSID("");
                       setSearchBand("All");
+                      setSearchRating("All");
                       setSearchDateFrom("");
                       setSearchDateTo("");
                     }}
@@ -358,7 +401,14 @@ export default function SearchPage() {
                           ตึก {getSortIcon("building")}
                         </button>
                       </th>
-                      <th className="px-4 py-3">ชั้น</th>
+                      <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <button
+                          onClick={() => toggleSort("floor")}
+                          className="flex items-center gap-2"
+                        >
+                          ชั้น {getSortIcon("floor")}
+                        </button>
+                      </th>
                       <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
                         <button
                           onClick={() => toggleSort("room")}
@@ -375,7 +425,14 @@ export default function SearchPage() {
                           จุด {getSortIcon("point")}
                         </button>
                       </th>
-                      <th className="px-4 py-3">Note</th>
+                      <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <button
+                          onClick={() => toggleSort("note")}
+                          className="flex items-center gap-2"
+                        >
+                          Note {getSortIcon("note")}
+                        </button>
+                      </th>
                       <th className="px-4 py-3">SSID</th>
                       <th className="px-4 py-3">Band</th>
                       <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -394,7 +451,14 @@ export default function SearchPage() {
                           Down {getSortIcon("tcpDownload")}
                         </button>
                       </th>
-                      <th className="px-4 py-3">Up</th>
+                      <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <button
+                          onClick={() => toggleSort("tcpUpload")}
+                          className="flex items-center gap-2"
+                        >
+                          Up {getSortIcon("tcpUpload")}
+                        </button>
+                      </th>
                       <th className="px-4 py-3">Ping</th>
                       <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
                         <button
@@ -404,7 +468,14 @@ export default function SearchPage() {
                           Jitter {getSortIcon("udpJitter")}
                         </button>
                       </th>
-                      <th className="px-4 py-3">Loss</th>
+                      <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <button
+                          onClick={() => toggleSort("udpLoss")}
+                          className="flex items-center gap-2"
+                        >
+                          Loss {getSortIcon("udpLoss")}
+                        </button>
+                      </th>
                       <th className="px-4 py-3">Rating</th>
                     </tr>
                   </thead>

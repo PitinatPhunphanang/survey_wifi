@@ -6,7 +6,10 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("traceroute_hops")
-    .select("*")
+    .select(`
+      *,
+      survey:survey_id (note)
+    `)
     .order("survey_timestamp", { ascending: false })
     .order("hop", { ascending: true });
 

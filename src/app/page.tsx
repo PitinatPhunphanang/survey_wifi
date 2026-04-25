@@ -75,6 +75,7 @@ const buildRoomSummaries = (rows: SurveyEntry[]): RoomSummary[] => {
 };
 const mapSurveyRow = (row: any): SurveyEntry => ({
   id: String(row.id ?? ""),
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
   timestamp: row.survey_timestamp ?? row.created_at ?? "",
   building: row.building ?? "",
   floor: String(row.floor ?? ""),
@@ -84,7 +85,7 @@ const mapSurveyRow = (row: any): SurveyEntry => ({
   bssid: row.bssid ?? "",
   band: row.band ?? "",
   radioType: row.radio_type ?? "",
-  channel: String(row.channel ?? ""),
+  channel: row.channel !== undefined && row.channel !== null ? Number(row.channel) : "",
   signalPercent: safeNum(row.signal_percent),
   rssi: safeNum(row.rssi_dbm),
   rxRate: safeNum(row.receive_rate_mbps),
@@ -108,6 +109,7 @@ const mapTraceRow = (row: any) => ({
   Building: row.building ?? "",
   Floor: String(row.floor ?? ""),
   Room_Point: String(row.room_point ?? ""),
+  Note: row.survey?.note ?? "",
   Hop: String(row.hop ?? ""),
   IP: row.ip ?? "",
   Hostname: "",
@@ -140,6 +142,12 @@ export default function Dashboard() {
   
   // Band Comparison note selection
   const [selectedComparisonNote, setSelectedComparisonNote] = useState<string>("");
+  
+  // Traceroute note selection
+  const [selectedTraceNote, setSelectedTraceNote] = useState<string>("");
+  
+  // Room detail table note filter
+  const [selectedDetailNote, setSelectedDetailNote] = useState<string>("");
 
   const fetchFromDatabase = async () => {
     setIsLoadingDB(true);
@@ -233,6 +241,32 @@ export default function Dashboard() {
   const selectedRoomDetails = useMemo(() => {
     return roomSummaries.find((room) => room.room === selectedRoomSummary) ?? null;
   }, [roomSummaries, selectedRoomSummary]);
+
+  // Get unique notes from the selected room
+  const notesInSelectedRoom = useMemo(() => {
+    if (!selectedRoomDetails) return [];
+    return Array.from(new Set(
+      selectedRoomDetails.points
+        .map(p => p.note)
+        .filter(note => note && note.trim() !== "")
+    )).sort();
+  }, [selectedRoomDetails]);
+
+  // Filter room details by selected note
+  const filteredRoomDetails = useMemo(() => {
+    if (!selectedRoomDetails) return null;
+    if (!selectedDetailNote) return selectedRoomDetails;
+    return {
+      ...selectedRoomDetails,
+      points: selectedRoomDetails.points.filter(p => p.note === selectedDetailNote),
+      pointCount: selectedRoomDetails.points.filter(p => p.note === selectedDetailNote).length
+    };
+  }, [selectedRoomDetails, selectedDetailNote]);
+
+  // Auto-select first note when room changes
+  useEffect(() => {
+    setSelectedDetailNote("");
+  }, [selectedRoomSummary]);
 
   // Auto-select the first room for traceroute when floor or band changes
   useEffect(() => {
@@ -368,9 +402,41 @@ export default function Dashboard() {
   };
   const summaryLines = generateSummary();
 
-  const currentTrace = traceData.filter(
-    t => t.Building === selectedBuilding && t.Floor === selectedFloor && t.Room_Point === selectedTraceRoom
-  );
+  // Get available notes for the selected room
+  const availableNotes = useMemo(() => {
+    if (!selectedTraceRoom) return [];
+    const notes = Array.from(new Set(
+      filteredEntries
+        .filter(e => e.room === selectedTraceRoom)
+        .map(e => e.note)
+        .filter(note => note && note.trim() !== "")
+    )).sort();
+    return notes;
+  }, [selectedTraceRoom, filteredEntries]);
+
+  // Auto-select first note when room changes
+  useEffect(() => {
+    if (availableNotes.length > 0) {
+      if (!selectedTraceNote || !availableNotes.includes(selectedTraceNote)) {
+        setSelectedTraceNote(availableNotes[0]);
+      }
+    } else {
+      setSelectedTraceNote("");
+    }
+  }, [availableNotes, selectedTraceNote]);
+
+  const currentTrace = useMemo(() => {
+    let filtered = traceData.filter(
+      t => t.Building === selectedBuilding && t.Floor === selectedFloor && t.Room_Point === selectedTraceRoom
+    );
+    
+    // Filter by selected note if specified
+    if (selectedTraceNote && selectedTraceNote.trim() !== "") {
+      filtered = filtered.filter(t => t.Note === selectedTraceNote);
+    }
+    
+    return filtered;
+  }, [traceData, selectedBuilding, selectedFloor, selectedTraceRoom, selectedTraceNote]);
 
   if (!isClient) return null;
 
@@ -643,6 +709,20 @@ export default function Dashboard() {
                           <option value="">-- เลือก --</option>
                           {Array.from(new Set(filteredEntries.map(e => e.room))).map(room => (
                             <option key={room} value={room}>{room}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">โน้ต:</span>
+                        <select
+                          className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
+                          value={selectedTraceNote}
+                          onChange={(e) => setSelectedTraceNote(e.target.value)}
+                          disabled={availableNotes.length === 0}
+                        >
+                          <option value="">-- ทั้งหมด --</option>
+                          {availableNotes.map(note => (
+                            <option key={note} value={note}>{note}</option>
                           ))}
                         </select>
                       </div>
@@ -929,12 +1009,28 @@ export default function Dashboard() {
                 {selectedRoomDetails && (
                   <Card className="shadow-sm border-gray-200 dark:border-gray-800 overflow-hidden">
                     <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
-                      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
                           <CardTitle className="text-base">ตารางจุดย่อยในห้อง {selectedRoomDetails.room}</CardTitle>
                           <p className="text-sm text-gray-500 mt-1">ใช้ note เป็นชื่อจุดทดสอบ เช่น ใต้โต๊ะ / ริมหน้าต่าง / ข้างห้องน้ำ</p>
                         </div>
-                        <Badge variant="secondary" className="w-fit">{selectedRoomDetails.pointCount} จุด</Badge>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-600 dark:text-gray-400">เลือกโน้ต:</span>
+                          <select
+                            className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
+                            value={selectedDetailNote}
+                            onChange={(e) => setSelectedDetailNote(e.target.value)}
+                          >
+                            <option value="">-- ทั้งหมด ({selectedRoomDetails.pointCount} จุด) --</option>
+                            {notesInSelectedRoom.map(note => {
+                              const count = selectedRoomDetails.points.filter(p => p.note === note).length;
+                              return (
+                                <option key={note} value={note}>{note} ({count})</option>
+                              );
+                            })}
+                          </select>
+                          <Badge variant="secondary" className="w-fit">{filteredRoomDetails?.pointCount || 0} จุด</Badge>
+                        </div>
                       </div>
                     </CardHeader>
                     <div className="overflow-x-auto">
@@ -955,7 +1051,7 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {selectedRoomDetails.points.map((point) => {
+                          {filteredRoomDetails?.points.map((point) => {
                             const report = evaluateEntry(point, DEFAULT_THRESHOLDS);
                             const rating = report.overallRating;
                             const badgeClass = rating === "GOOD" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : rating === "FAIR" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";

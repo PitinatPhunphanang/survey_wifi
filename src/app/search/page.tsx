@@ -12,13 +12,17 @@ import Link from "next/link";
 
 const safeNum = (val: any) => (isNaN(Number(val)) || val === "" || val === null ? 0 : Number(val));
 
-const mapSurveyRow = (row: any): SurveyEntry => ({
+type RawSurveyEntry = SurveyEntry & { point: string };
+
+const mapSurveyRow = (row: any): RawSurveyEntry => ({
   id: String(row.id ?? ""),
   createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
   timestamp: row.survey_timestamp ?? row.created_at ?? "",
   building: row.building ?? "",
   floor: String(row.floor ?? ""),
+  // room_point = ห้อง, note/point = จุดสำรวจในห้องนั้น
   room: String(row.room_point ?? ""),
+  point: String(row.point ?? row.point_no ?? row.survey_point ?? row.note ?? ""),
   note: row.note ?? "",
   ssid: row.ssid ?? "",
   bssid: row.bssid ?? "",
@@ -42,11 +46,11 @@ const mapSurveyRow = (row: any): SurveyEntry => ({
   udpLoss: safeNum(row.udp_packetloss_pct),
 });
 
-type SortField = "timestamp" | "building" | "room" | "rssi" | "tcpDownload" | "udpJitter";
+type SortField = "timestamp" | "building" | "room" | "point" | "rssi" | "tcpDownload" | "udpJitter";
 type SortOrder = "asc" | "desc";
 
 export default function SearchPage() {
-  const [allData, setAllData] = useState<SurveyEntry[]>([]);
+  const [allData, setAllData] = useState<RawSurveyEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
@@ -54,6 +58,7 @@ export default function SearchPage() {
   const [searchBuilding, setSearchBuilding] = useState("");
   const [searchFloor, setSearchFloor] = useState("");
   const [searchRoom, setSearchRoom] = useState("");
+  const [searchPoint, setSearchPoint] = useState("");
   const [searchSSID, setSearchSSID] = useState("");
   const [searchBand, setSearchBand] = useState<"All" | "2.4GHz" | "5GHz" | "6GHz">("All");
   const [searchDateFrom, setSearchDateFrom] = useState("");
@@ -94,6 +99,7 @@ export default function SearchPage() {
       const matchBuilding = !searchBuilding || entry.building.toLowerCase().includes(searchBuilding.toLowerCase());
       const matchFloor = !searchFloor || entry.floor.toLowerCase().includes(searchFloor.toLowerCase());
       const matchRoom = !searchRoom || entry.room.toLowerCase().includes(searchRoom.toLowerCase());
+      const matchPoint = !searchPoint || entry.point.toLowerCase().includes(searchPoint.toLowerCase());
       const matchSSID = !searchSSID || entry.ssid.toLowerCase().includes(searchSSID.toLowerCase());
       
       let matchBand = true;
@@ -114,9 +120,9 @@ export default function SearchPage() {
         matchDate = matchDate && entryDate <= toDate;
       }
 
-      return matchBuilding && matchFloor && matchRoom && matchSSID && matchBand && matchDate;
+      return matchBuilding && matchFloor && matchRoom && matchPoint && matchSSID && matchBand && matchDate;
     });
-  }, [allData, searchBuilding, searchFloor, searchRoom, searchSSID, searchBand, searchDateFrom, searchDateTo]);
+  }, [allData, searchBuilding, searchFloor, searchRoom, searchPoint, searchSSID, searchBand, searchDateFrom, searchDateTo]);
 
   // Sort data
   const sortedData = useMemo(() => {
@@ -232,12 +238,23 @@ export default function SearchPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium mb-1 block">ห้อง/จุด (Room/Point)</label>
+                  <label className="text-sm font-medium mb-1 block">ห้อง (Room)</label>
                   <input
                     type="text"
-                    placeholder="เช่น ห้อง 101, ใต้โต๊ะ..."
+                    placeholder="เช่น 101, 200..."
                     value={searchRoom}
                     onChange={(e) => setSearchRoom(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-1 block">จุด (Point)</label>
+                  <input
+                    type="text"
+                    placeholder="เช่น 1, 2, หน้าโต๊ะ, มุมห้อง..."
+                    value={searchPoint}
+                    onChange={(e) => setSearchPoint(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -293,6 +310,7 @@ export default function SearchPage() {
                       setSearchBuilding("");
                       setSearchFloor("");
                       setSearchRoom("");
+                      setSearchPoint("");
                       setSearchSSID("");
                       setSearchBand("All");
                       setSearchDateFrom("");
@@ -346,7 +364,15 @@ export default function SearchPage() {
                           onClick={() => toggleSort("room")}
                           className="flex items-center gap-2"
                         >
-                          ห้อง/จุด {getSortIcon("room")}
+                          ห้อง {getSortIcon("room")}
+                        </button>
+                      </th>
+                      <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <button
+                          onClick={() => toggleSort("point")}
+                          className="flex items-center gap-2"
+                        >
+                          จุด {getSortIcon("point")}
                         </button>
                       </th>
                       <th className="px-4 py-3">Note</th>
@@ -385,7 +411,7 @@ export default function SearchPage() {
                   <tbody>
                     {sortedData.length === 0 ? (
                       <tr>
-                        <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={15} className="px-4 py-8 text-center text-gray-500">
                           ไม่พบข้อมูลที่ตรงกับเกณฑ์การค้นหา
                         </td>
                       </tr>
@@ -407,6 +433,7 @@ export default function SearchPage() {
                             <td className="px-4 py-3 font-medium">{entry.building || "-"}</td>
                             <td className="px-4 py-3">{entry.floor || "-"}</td>
                             <td className="px-4 py-3 font-medium">{entry.room || "-"}</td>
+                            <td className="px-4 py-3 font-medium">{entry.point || "-"}</td>
                             <td className="px-4 py-3 text-xs">{entry.note || "-"}</td>
                             <td className="px-4 py-3 text-xs">{entry.ssid || "-"}</td>
                             <td className="px-4 py-3">

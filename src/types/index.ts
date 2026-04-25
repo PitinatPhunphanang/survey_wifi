@@ -12,7 +12,7 @@ export interface SurveyEntry {
   // B) Wi-Fi Information
   ssid: string;
   bssid: string;
-  band: "2.4 GHz" | "5 GHz" | "6 GHz" | "";
+  band: string | null; // Support various formats: "2.4 GHz", "2.4", "5 GHz", "5", "2G", "5G", etc.
   radioType: string;
   channel: number | "";
   signalPercent: number | "";

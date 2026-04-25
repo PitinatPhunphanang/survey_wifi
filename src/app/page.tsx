@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SurveyEntry, DEFAULT_THRESHOLDS } from "@/types";
 import { evaluateEntry } from "@/lib/evaluation";
+import { normalizeBand, getBandColor } from "@/lib/utils";
 import { LayoutDashboard, RefreshCw, Building2, Map as MapIcon, ChevronDown, ChevronRight, Activity, Printer, Trash2 } from "lucide-react";
+import Link from "next/link";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LabelList, ReferenceLine, ComposedChart, Line
@@ -132,6 +134,12 @@ export default function Dashboard() {
   // Traceroute room selection within a floor
   const [selectedTraceRoom, setSelectedTraceRoom] = useState<string>("");
   const [selectedRoomSummary, setSelectedRoomSummary] = useState<string>("");
+  
+  // Band filter: "All" | "2.4GHz" | "5GHz"
+  const [selectedBand, setSelectedBand] = useState<"All" | "2.4GHz" | "5GHz">("All");
+  
+  // Band Comparison note selection
+  const [selectedComparisonNote, setSelectedComparisonNote] = useState<string>("");
 
   const fetchFromDatabase = async () => {
     setIsLoadingDB(true);
@@ -210,20 +218,30 @@ export default function Dashboard() {
     });
   }, [history, selectedBuilding, selectedFloor]);
 
-  const roomSummaries = useMemo(() => buildRoomSummaries(entries), [entries]);
+  // Filter entries by selected band
+  const filteredEntries = useMemo(() => {
+    if (selectedBand === "All") return entries;
+    
+    return entries.filter(entry => {
+      const normalized = normalizeBand(entry.band);
+      return normalized === selectedBand;
+    });
+  }, [entries, selectedBand]);
+
+  const roomSummaries = useMemo(() => buildRoomSummaries(filteredEntries), [filteredEntries]);
 
   const selectedRoomDetails = useMemo(() => {
     return roomSummaries.find((room) => room.room === selectedRoomSummary) ?? null;
   }, [roomSummaries, selectedRoomSummary]);
 
-  // Auto-select the first room for traceroute when floor changes
+  // Auto-select the first room for traceroute when floor or band changes
   useEffect(() => {
-    if (entries.length > 0) {
-      setSelectedTraceRoom(entries[0].room);
+    if (filteredEntries.length > 0) {
+      setSelectedTraceRoom(filteredEntries[0].room);
     } else {
       setSelectedTraceRoom("");
     }
-  }, [entries]);
+  }, [filteredEntries]);
 
   useEffect(() => {
     if (roomSummaries.length > 0) {
@@ -292,15 +310,15 @@ export default function Dashboard() {
   // ============================================
   // Floor Report KPI & Chart Data Calculations
   // ============================================
-  const count = entries.length;
-  const avgRssi = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.rssi), 0) / count : 0;
-  const avgTcpDown = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.tcpDownload), 0) / count : 0;
-  const avgTcpUp = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.tcpUpload), 0) / count : 0;
-  const avgPing = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.pingServerMs), 0) / count : 0;
-  const avgJitter = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.udpJitter), 0) / count : 0;
-  const avgLoss = count > 0 ? entries.reduce((acc, curr) => acc + safeNum(curr.udpLoss), 0) / count : 0;
+  const count = filteredEntries.length;
+  const avgRssi = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.rssi), 0) / count : 0;
+  const avgTcpDown = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.tcpDownload), 0) / count : 0;
+  const avgTcpUp = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.tcpUpload), 0) / count : 0;
+  const avgPing = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.pingServerMs), 0) / count : 0;
+  const avgJitter = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.udpJitter), 0) / count : 0;
+  const avgLoss = count > 0 ? filteredEntries.reduce((acc, curr) => acc + safeNum(curr.udpLoss), 0) / count : 0;
 
-  const evaluated = entries.map(e => ({ ...e, report: evaluateEntry(e, DEFAULT_THRESHOLDS) }));
+  const evaluated = filteredEntries.map(e => ({ ...e, report: evaluateEntry(e, DEFAULT_THRESHOLDS) }));
   const poorCount = evaluated.filter(e => e.report.overallRating === "POOR").length;
 
   const ratingData = [
@@ -309,11 +327,11 @@ export default function Dashboard() {
     { name: "POOR", value: poorCount, color: "#ef4444" }
   ].filter(d => d.value > 0);
 
-  const rssiData = [...entries].map(e => ({ name: pointLabel(e), rssi: safeNum(e.rssi) })).sort((a, b) => a.rssi - b.rssi);
-  const throughputData = entries.map(e => ({ name: pointLabel(e), Download: safeNum(e.tcpDownload), Upload: safeNum(e.tcpUpload) }));
-  const pingData = entries.map(e => ({ name: pointLabel(e), ping: safeNum(e.pingServerMs) }));
-  const jitterData = entries.map(e => ({ name: pointLabel(e), jitter: safeNum(e.udpJitter) }));
-  const lossData = entries.map(e => ({ name: pointLabel(e), udpLoss: safeNum(e.udpLoss), pingLoss: safeNum(e.pingLoss) }));
+  const rssiData = [...filteredEntries].map(e => ({ name: pointLabel(e), rssi: safeNum(e.rssi) })).sort((a, b) => a.rssi - b.rssi);
+  const throughputData = filteredEntries.map(e => ({ name: pointLabel(e), Download: safeNum(e.tcpDownload), Upload: safeNum(e.tcpUpload) }));
+  const pingData = filteredEntries.map(e => ({ name: pointLabel(e), ping: safeNum(e.pingServerMs) }));
+  const jitterData = filteredEntries.map(e => ({ name: pointLabel(e), jitter: safeNum(e.udpJitter) }));
+  const lossData = filteredEntries.map(e => ({ name: pointLabel(e), udpLoss: safeNum(e.udpLoss), pingLoss: safeNum(e.pingLoss) }));
 
   const bandCounts = entries.reduce((acc, curr) => {
     const band = curr.band ? curr.band.toUpperCase() : "UNKNOWN";
@@ -325,11 +343,11 @@ export default function Dashboard() {
     name: key, value: bandCounts[key], color: ['#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'][i % 4]
   }));
 
-  const sortedRssi = [...entries].sort((a, b) => safeNum(a.rssi) - safeNum(b.rssi));
+  const sortedRssi = [...filteredEntries].sort((a, b) => safeNum(a.rssi) - safeNum(b.rssi));
   const worstRssi = sortedRssi.slice(0, 3).map(e => ({ room: pointLabel(e), val: e.rssi }));
-  const worstPing = [...entries].sort((a, b) => safeNum(b.pingServerMs) - safeNum(a.pingServerMs))[0];
-  const worstJitter = [...entries].sort((a, b) => safeNum(b.udpJitter) - safeNum(a.udpJitter))[0];
-  const worstLoss = [...entries].sort((a, b) => Math.max(safeNum(b.udpLoss), safeNum(b.pingLoss)) - Math.max(safeNum(a.udpLoss), safeNum(a.pingLoss)))[0];
+  const worstPing = [...filteredEntries].sort((a, b) => safeNum(b.pingServerMs) - safeNum(a.pingServerMs))[0];
+  const worstJitter = [...filteredEntries].sort((a, b) => safeNum(b.udpJitter) - safeNum(a.udpJitter))[0];
+  const worstLoss = [...filteredEntries].sort((a, b) => Math.max(safeNum(b.udpLoss), safeNum(b.pingLoss)) - Math.max(safeNum(a.udpLoss), safeNum(a.pingLoss)))[0];
 
   const generateSummary = () => {
     let summary: string[] = [];
@@ -376,6 +394,13 @@ export default function Dashboard() {
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDB ? 'animate-spin' : ''}`} />
               {isLoadingDB ? "กำลังซิงค์..." : "ดึงข้อมูลล่าสุด"}
             </Button>
+
+            {/* ปุ่มไปหน้า Search */}
+            <Link href="/search">
+              <Button variant="outline" className="w-full justify-start text-sm">
+                 Raw Data / Search
+              </Button>
+            </Link>
           </div>
 
           <div>
@@ -476,10 +501,34 @@ export default function Dashboard() {
               {selectedBuilding && selectedFloor ? `รายงานอาคาร: ${selectedBuilding} - ชั้น ${selectedFloor}` : 'ภาพรวม Dashboard'}
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              {selectedBuilding && selectedFloor ? `แสดงข้อมูลจุดทดสอบทั้งหมด ${entries.length} จุดในชั้นนี้` : `กรุณาเลือกตึกและชั้นจากเมนูด้านซ้ายเพื่อดูรายละเอียด`}
+              {selectedBuilding && selectedFloor ? `แสดงข้อมูลจุดทดสอบทั้งหมด ${filteredEntries.length} จุดในชั้นนี้` : `กรุณาเลือกตึกและชั้นจากเมนูด้านซ้ายเพื่อดูรายละเอียด`}
             </p>
           </div>
         </header>
+
+        {/* Band Filter Tabs */}
+        {selectedBuilding && selectedFloor && entries.length > 0 && (
+          <div className="flex-shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-8 py-3 print:hidden">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">ตัวกรองแถบความถี่:</span>
+              <div className="flex gap-2">
+                {["All", "2.4GHz", "5GHz"].map((band) => (
+                  <button
+                    key={band}
+                    onClick={() => setSelectedBand(band as "All" | "2.4GHz" | "5GHz")}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      selectedBand === band
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {band === "All" ? "รวมทั้งหมด" : band}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Dashboard Area */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 bg-gray-50 dark:bg-gray-950">
@@ -506,6 +555,15 @@ export default function Dashboard() {
                 <KpiCard title="Poor Points" value={`${poorCount} / ${count}`} isWarning={poorCount > 0} highlight />
               </div>
 
+              {/* Band Comparison Section */}
+              {selectedBand === "All" && filteredEntries.length > 0 && (
+                <BandComparisonSection 
+                  entries={filteredEntries}
+                  selectedNote={selectedComparisonNote}
+                  onNoteChange={setSelectedComparisonNote}
+                />
+              )}
+
               {/* Smart Summary & Worst Points */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:break-inside-avoid">
                 <Card className="lg:col-span-2 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
@@ -523,25 +581,28 @@ export default function Dashboard() {
 
                 <Card className="border-red-200 dark:border-red-900/30">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-base text-red-600 dark:text-red-400">จุดวิกฤตที่ต้องแก้ไข (Action List)</CardTitle>
+                    <CardTitle className="text-base text-red-600 dark:text-red-400">
+                      จุดวิกฤตที่ต้องแก้ไข (Action List)
+                      {selectedBand !== "All" && <span className="text-sm font-normal ml-1">- {selectedBand}</span>}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3 text-sm">
                       <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-1">
                         <span className="text-gray-500">สัญญาณอ่อนที่สุด (RSSI):</span>
-                        <span className="font-semibold text-red-500">{worstRssi.map(r => r.room).join(', ')}</span>
+                        <span className="font-semibold text-red-500">{worstRssi.length > 0 ? worstRssi.map(r => r.room).join(', ') : "-"}</span>
                       </div>
                       <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-1">
                         <span className="text-gray-500">ปิงสูงที่สุด (Ping):</span>
-                        <span className="font-medium">{worstPing?.room} ({safeNum(worstPing?.pingServerMs)}ms)</span>
+                        <span className="font-medium">{worstPing ? `${worstPing.room} (${safeNum(worstPing.pingServerMs)}ms)` : "-"}</span>
                       </div>
                       <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-1">
                         <span className="text-gray-500">ความแกว่งสูงสุด (Jitter):</span>
-                        <span className="font-medium">{worstJitter?.room} ({safeNum(worstJitter?.udpJitter)}ms)</span>
+                        <span className="font-medium">{worstJitter ? `${worstJitter.room} (${safeNum(worstJitter.udpJitter)}ms)` : "-"}</span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-gray-500">สูญหายสูงสุด (Loss):</span>
-                        <span className="font-medium">{worstLoss?.room} ({Math.max(safeNum(worstLoss?.udpLoss), safeNum(worstLoss?.pingLoss))}%)</span>
+                        <span className="font-medium">{worstLoss ? `${worstLoss.room} (${Math.max(safeNum(worstLoss.udpLoss), safeNum(worstLoss.pingLoss))}%)` : "-"}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -559,18 +620,32 @@ export default function Dashboard() {
                       </h2>
                       <p className="text-gray-500 text-sm mt-1">การวิเคราะห์คุณภาพเครือข่ายแบบ Hop-by-hop</p>
                     </div>
-                    <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
-                      <span className="text-sm font-medium text-gray-600 dark:text-gray-300">เลือกจุดทดสอบ:</span>
-                      <select
-                        className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
-                        value={selectedTraceRoom}
-                        onChange={(e) => setSelectedTraceRoom(e.target.value)}
-                      >
-                        <option value="">-- เลือก --</option>
-                        {Array.from(new Set(entries.map(e => e.room))).map(room => (
-                          <option key={room} value={room}>{room}</option>
-                        ))}
-                      </select>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Band:</span>
+                        <select
+                          className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
+                          value={selectedBand}
+                          onChange={(e) => setSelectedBand(e.target.value as "All" | "2.4GHz" | "5GHz")}
+                        >
+                          <option value="All">All</option>
+                          <option value="2.4GHz">2.4 GHz</option>
+                          <option value="5GHz">5 GHz</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">จุดทดสอบ:</span>
+                        <select
+                          className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
+                          value={selectedTraceRoom}
+                          onChange={(e) => setSelectedTraceRoom(e.target.value)}
+                        >
+                          <option value="">-- เลือก --</option>
+                          {Array.from(new Set(filteredEntries.map(e => e.room))).map(room => (
+                            <option key={room} value={room}>{room}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
 
@@ -869,6 +944,7 @@ export default function Dashboard() {
                             <th className="px-4 py-3">เวลา</th>
                             <th className="px-4 py-3">จุดทดสอบ</th>
                             <th className="px-4 py-3">SSID</th>
+                            <th className="px-4 py-3">Band</th>
                             <th className="px-4 py-3">RSSI</th>
                             <th className="px-4 py-3">Ping</th>
                             <th className="px-4 py-3">Down</th>
@@ -883,11 +959,13 @@ export default function Dashboard() {
                             const report = evaluateEntry(point, DEFAULT_THRESHOLDS);
                             const rating = report.overallRating;
                             const badgeClass = rating === "GOOD" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : rating === "FAIR" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
+                            const bandColor = getBandColor(point.band);
                             return (
                               <tr key={point.id} className="border-b dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
                                 <td className="px-4 py-3 text-xs text-gray-500">{point.timestamp || "-"}</td>
                                 <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{point.note || point.room}</td>
                                 <td className="px-4 py-3">{point.ssid || "-"}</td>
+                                <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${bandColor.bg} ${bandColor.text}`}>{normalizeBand(point.band)}</span></td>
                                 <td className="px-4 py-3">{safeNum(point.rssi).toFixed(1)} dBm</td>
                                 <td className="px-4 py-3">{safeNum(point.pingServerMs).toFixed(1)} ms</td>
                                 <td className="px-4 py-3">{safeNum(point.tcpDownload).toFixed(1)} Mbps</td>
@@ -926,6 +1004,137 @@ function KpiCard({ title, value, isWarning = false, highlight = false }: { title
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function BandComparisonSection({ entries, selectedNote, onNoteChange }: { entries: SurveyEntry[]; selectedNote: string; onNoteChange: (note: string) => void }) {
+  type PointPair = {
+    label: string;
+    entry24: SurveyEntry | undefined;
+    entry5: SurveyEntry | undefined;
+  };
+
+  const pointMap = new Map<string, PointPair>();
+
+  entries.forEach(entry => {
+    const key = entry.note?.trim() || "Unknown";
+    if (!pointMap.has(key)) {
+      pointMap.set(key, {
+        label: key,
+        entry24: undefined,
+        entry5: undefined,
+      });
+    }
+    const pair = pointMap.get(key)!;
+    const normalized = normalizeBand(entry.band);
+    if (normalized === "2.4GHz") {
+      pair.entry24 = entry;
+    } else if (normalized === "5GHz") {
+      pair.entry5 = entry;
+    }
+  });
+
+  const pairs = Array.from(pointMap.values()).filter(p => p.entry24 && p.entry5);
+  const availableNotes = pairs.map(p => p.label);
+  const currentNote = selectedNote && availableNotes.includes(selectedNote) ? selectedNote : availableNotes[0] || "";
+  const currentPair = pairs.find(p => p.label === currentNote);
+
+  if (pairs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4 print:break-inside-avoid">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+            เปรียบเทียบแยกแถบความถี่ (Band Comparison)
+          </h3>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">เลือก Note:</span>
+            <select
+              className="h-9 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
+              value={currentNote}
+              onChange={(e) => onNoteChange(e.target.value)}
+            >
+              <option value="">-- เลือก --</option>
+              {availableNotes.map(note => (
+                <option key={note} value={note}>{note}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {currentPair && (
+          <Card className="border-l-4 border-l-indigo-500">
+            <CardHeader className="pb-3 bg-gray-50/50 dark:bg-gray-900/50">
+              <CardTitle className="text-base text-gray-900 dark:text-gray-100">{currentPair.label}</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {currentPair.entry24 && (
+                  <div className={`pb-4 ${currentPair.entry5 ? "md:border-r border-gray-200 dark:border-gray-700 md:pr-6" : ""}`}>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                        2.4 GHz
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">RSSI</span>
+                        <span className={`font-bold ${safeNum(currentPair.entry24.rssi) < -75 ? "text-red-500" : safeNum(currentPair.entry24.rssi) < -67 ? "text-amber-500" : "text-emerald-500"}`}>{safeNum(currentPair.entry24.rssi).toFixed(1)} dBm</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Download</span>
+                        <span className="font-bold">{safeNum(currentPair.entry24.tcpDownload).toFixed(1)} Mbps</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Upload</span>
+                        <span className="font-bold">{safeNum(currentPair.entry24.tcpUpload).toFixed(1)} Mbps</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Ping</span>
+                        <span className="font-bold">{safeNum(currentPair.entry24.pingServerMs).toFixed(1)} ms</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {currentPair.entry5 && (
+                  <div className="pl-4 md:pl-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                        5 GHz
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">RSSI</span>
+                        <span className={`font-bold ${safeNum(currentPair.entry5.rssi) < -75 ? "text-red-500" : safeNum(currentPair.entry5.rssi) < -67 ? "text-amber-500" : "text-emerald-500"}`}>{safeNum(currentPair.entry5.rssi).toFixed(1)} dBm</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Download</span>
+                        <span className="font-bold">{safeNum(currentPair.entry5.tcpDownload).toFixed(1)} Mbps</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Upload</span>
+                        <span className="font-bold">{safeNum(currentPair.entry5.tcpUpload).toFixed(1)} Mbps</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Ping</span>
+                        <span className="font-bold">{safeNum(currentPair.entry5.pingServerMs).toFixed(1)} ms</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
   );
 }
 

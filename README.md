@@ -77,13 +77,54 @@ survey_wifi/
 
 - `src/app/page.tsx` เป็นหน้า dashboard หลัก
 - โหลดข้อมูลจาก `/api/survey` และ `/api/trace`
-- รองรับการกรองตาม building และ floor
+- รองรับการกรองตาม building, floor และ **band (2.4GHz / 5GHz)**
 - แสดง KPI, room summary, traceroute timeline, latency chart และ packet loss chart
 - รองรับการลบข้อมูลทั้งระดับตึกหรือชั้นผ่าน `DELETE /api/survey`
+
+#### ✨ ฟีเจอร์ Band Filtering (ใหม่)
+
+1. **Band Filter Tabs** (ด้านบนหน้า Dashboard)
+   - รวมทั้งหมด (All)
+   - 2.4 GHz
+   - 5 GHz
+   - ทุก KPI metrics จะเปลี่ยนตามการเลือก band
+
+2. **Band Comparison Section**
+   - แสดงเมื่อเลือก "รวมทั้งหมด" (All)
+   - เลือก note ผ่าน dropdown
+   - เทียบค่า RSSI, Download, Upload, Ping ของ 2.4GHz vs 5GHz ในจุด (note) เดียวกัน
+   - แสดงเฉพาะคู่ที่มีทั้ง 2 band
+
+3. **Band Badges ในตาราง**
+   - สีฟ้า = 2.4GHz
+   - สีม่วง = 5GHz
+   - สีเขียว = 6GHz (ถ้ามี)
+
+4. **Traceroute Band Filter**
+   - Dropdown เลือก Band ร่วมกับ Room/Note
+   - สามารถ filter traceroute data ตาม band
+
+### Helper Functions (`src/lib/utils.ts`)
+
+- **`normalizeBand(band)`** - แปลง band formats ต่างๆ เป็น standard format
+  - Input: "2.4 GHz", "2.4", "2G", "5GHz", "5", "5G" เป็นต้น
+  - Output: "2.4GHz" | "5GHz" | "6GHz" | "Unknown"
+
+- **`getBandColor(band)`** - ส่งคืนสี badge สำหรับแต่ละ band
+  - 2.4GHz: สีฟ้า
+  - 5GHz: สีม่วง
+  - 6GHz: สีเขียว
+
+### Type Definitions (`src/types/index.ts`)
+
+- `SurveyEntry` interface:
+  - `band` field เปลี่ยนจาก `"2.4 GHz" | "5 GHz" | "6 GHz" | ""` → `string | null`
+  - รองรับ band formats หลากหลาย (ยืดหยุ่นต่อการเปลี่ยนแปลงข้อมูล)
 
 ### API routes
 
 - `GET /api/survey` ดึงข้อมูลจากตาราง `surveys` โดยเรียงตาม `survey_timestamp` ล่าสุดก่อน
+  - หมายเหตุ: band filtering ทำด้านหน้า (client-side) หลังจากดึงข้อมูล
 - `DELETE /api/survey` ลบข้อมูลตาม `building` หรือ `building + floor`
 - `GET /api/trace` ดึงข้อมูลจากตาราง `traceroute_hops`
 
@@ -114,6 +155,43 @@ SUPABASE_SECRET_KEY=your-secret-key
 
 - ฝั่ง Next.js ใช้ค่าเหล่านี้สำหรับเชื่อม Supabase
 - `wifi.py` จะพยายามไล่หา `.env.local` จากโฟลเดอร์แม่ขึ้นไป
+- ข้อมูล band จากเครื่องสำรวจจะถูกบันทึกตามที่ได้มา (เช่น "2.4 GHz", "2.4", "5GHz" เป็นต้น)
+  - Dashboard จะ normalize ค่าเหล่านี้ผ่าน `normalizeBand()` function
+
+## Dashboard Features
+
+### KPI Metrics
+- AVG RSSI
+- AVG Download
+- AVG Upload  
+- AVG Ping
+- AVG Jitter
+- Poor Points
+- **ทั้งหมดสามารถกรองตาม band ได้**
+
+### Charts & Visualizations
+- Quality Rating (Good/Fair/Poor)
+- Band Distribution (สัดส่วน 2.4GHz/5GHz)
+- RSSI by Point (เรียงจากแย่ไปดี)
+- TCP Throughput (Download vs Upload)
+- Server Ping
+- UDP Jitter
+- Packet Loss (UDP + Ping)
+
+### Room Summary Table
+- แสดงสรุปค่าเฉลี่ยต่อห้อง
+- เทียบ worst points
+
+### Point Detail Table
+- แสดงแต่ละจุดทดสอบอย่างละเอียด
+- **เพิ่ม Band Badge** เพื่อแสดง band ชัดเจน
+
+### Traceroute Analysis
+- Timeline view แต่ละ hop
+- Latency range chart
+- Packet loss chart
+- Raw data table
+- **รองรับการกรองตาม band**
 
 ## การรันเว็บ
 

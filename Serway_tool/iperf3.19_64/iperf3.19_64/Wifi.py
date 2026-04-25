@@ -34,8 +34,8 @@ find_and_load_env()
 # =========================
 # CONFIG
 # =========================
-SERVER_IP = "192.168.1.166"
-IPERF_PORT = 5201
+SERVER_IP = "10.8.1.93"
+IPERF_PORT = 5202
 IPERF_DURATION = 10
 UDP_BANDWIDTH = "20M"
 PING_COUNT = 4

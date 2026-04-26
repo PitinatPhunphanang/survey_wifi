@@ -401,6 +401,17 @@ class WifiSurveyApp(ctk.CTk):
         except Exception:
             return "Unknown"
 
+    def normalize_band(self, band):
+        """Normalize band string to standard format: '2.4 GHz' or '5 GHz'."""
+        if not band:
+            return "Unknown"
+        b = str(band).strip().lower().replace(" ", "")
+        if "2.4" in b:
+            return "2.4 GHz"
+        if "5" in b:
+            return "5 GHz"
+        return "Unknown"
+
     # =========================
     # ROUTING / PING
     # =========================
@@ -937,7 +948,7 @@ class WifiSurveyApp(ctk.CTk):
                     "note": self.sanitize_db_value(row.get("Note")),
                     "ssid": self.sanitize_db_value(row.get("SSID")),
                     "bssid": self.sanitize_db_value(row.get("BSSID")),
-                    "band": self.sanitize_db_value(row.get("Band")),
+                    "band": self.normalize_band(self.sanitize_db_value(row.get("Band"))),
                     "radio_type": self.sanitize_db_value(row.get("Radio_Type")),
                     "channel": str(channel_value) if channel_value is not None else None,
                     "signal_percent": self.sanitize_db_value(row.get("Signal_%")),
@@ -960,17 +971,28 @@ class WifiSurveyApp(ctk.CTk):
                     "rating": self.sanitize_db_value(row.get("Rating")),
                 }
 
-                response = (
+                # เช็คก่อนว่ามีข้อมูลซ้ำไหม
+                existing = (
                     supabase.table("surveys")
-                    .upsert(
-                        survey_data,
-                        on_conflict="building,floor,room_point,note",
-                    )
+                    .select("id")
+                    .eq("building", survey_data["building"] or "")
+                    .eq("floor", survey_data["floor"] or "")
+                    .eq("room_point", survey_data["room_point"] or "")
+                    .eq("note", survey_data["note"] or "")
+                    .eq("band", survey_data["band"] or "")
                     .execute()
                 )
 
+                if existing.data:
+                    # ซ้ำ → ไม่ทำอะไรเลย แจ้งเตือนอย่างเดียว
+                    self.set_status("⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ", "yellow")
+                    return True, "⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ"
+
+                # ไม่ซ้ำ → insert ใหม่
+                response = supabase.table("surveys").insert(survey_data).execute()
+
                 if not getattr(response, "data", None):
-                    return False, f"❌ Failed to upsert survey data: {response}"
+                    return False, f"❌ Failed to insert survey data: {response}"
 
                 survey_id = response.data[0]["id"]
 

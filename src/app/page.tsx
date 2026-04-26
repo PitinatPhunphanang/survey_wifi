@@ -151,6 +151,9 @@ export default function Dashboard() {
   // Band filter: "All" | "2.4GHz" | "5GHz"
   const [selectedBand, setSelectedBand] = useState<"All" | "2.4GHz" | "5GHz">("All");
   
+  // Band filter แยกสำหรับ Route Analysis
+  const [selectedTraceBand, setSelectedTraceBand] = useState<"All" | "2.4GHz" | "5GHz">("All");
+  
   // Band Comparison note selection
   const [selectedComparisonNote, setSelectedComparisonNote] = useState<string>("");
   
@@ -437,17 +440,26 @@ export default function Dashboard() {
   }, [availableNotes, selectedTraceNote]);
 
   const currentTrace = useMemo(() => {
-    let filtered = traceData.filter(
-      t => t.Building === selectedBuilding && t.Floor === selectedFloor && t.Room_Point === selectedTraceRoom
+    // หา survey entries ที่ตรงกับ room + note จาก history ทั้งหมด (ไม่ filter band)
+    let matchedEntries = history.filter(
+      e =>
+        e.building === selectedBuilding &&
+        e.floor === selectedFloor &&
+        e.room === selectedTraceRoom &&
+        (e.note ?? "") === (selectedTraceNote ?? "")
     );
-    
-    // Filter by selected note if specified
-    if (selectedTraceNote && selectedTraceNote.trim() !== "") {
-      filtered = filtered.filter(t => t.Note === selectedTraceNote);
+
+    // filter ด้วย traceBand ถ้าไม่ใช่ All
+    if (selectedTraceBand !== "All") {
+      const norm = selectedTraceBand === "2.4GHz" ? "2.4 GHz" : "5 GHz";
+      matchedEntries = matchedEntries.filter(e => e.band === norm || normalizeBand(e.band) === selectedTraceBand);
     }
-    
-    return filtered;
-  }, [traceData, selectedBuilding, selectedFloor, selectedTraceRoom, selectedTraceNote]);
+
+    if (matchedEntries.length === 0) return [];
+
+    const firstId = matchedEntries[0].id;
+    return traceData.filter(t => String(t.survey_id) === String(firstId));
+  }, [traceData, history, selectedBuilding, selectedFloor, selectedTraceRoom, selectedTraceNote, selectedTraceBand]);
 
   if (!isClient) return null;
 
@@ -702,8 +714,8 @@ export default function Dashboard() {
                         <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Band:</span>
                         <select
                           className="h-8 rounded-md border border-gray-200 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-sm focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 focus:outline-none"
-                          value={selectedBand}
-                          onChange={(e) => setSelectedBand(e.target.value as "All" | "2.4GHz" | "5GHz")}
+                          value={selectedTraceBand}
+                          onChange={(e) => setSelectedTraceBand(e.target.value as "All" | "2.4GHz" | "5GHz")}
                         >
                           <option value="All">All</option>
                           <option value="2.4GHz">2.4 GHz</option>

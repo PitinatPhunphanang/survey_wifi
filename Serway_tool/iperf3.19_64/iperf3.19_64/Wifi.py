@@ -960,10 +960,17 @@ class WifiSurveyApp(ctk.CTk):
                     "rating": self.sanitize_db_value(row.get("Rating")),
                 }
 
-                response = supabase.table("surveys").insert(survey_data).execute()
+                response = (
+                    supabase.table("surveys")
+                    .upsert(
+                        survey_data,
+                        on_conflict="building,floor,room_point,note",
+                    )
+                    .execute()
+                )
 
                 if not getattr(response, "data", None):
-                    return False, f"❌ Failed to insert survey data: {response}"
+                    return False, f"❌ Failed to upsert survey data: {response}"
 
                 survey_id = response.data[0]["id"]
 

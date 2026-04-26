@@ -44,9 +44,20 @@ const average = (values: number[]) => {
 };
 
 const buildRoomSummaries = (rows: SurveyEntry[]): RoomSummary[] => {
+  // dedup: ห้องเดิม + note เดิม เก็บแค่อันเดียว (อันล่าสุด)
+  const seen = new Map<string, SurveyEntry>();
+  rows.forEach((row) => {
+    const key = `${row.room?.trim() || "Unknown"}__${row.note?.trim() || ""}`;
+    const existing = seen.get(key);
+    if (!existing || (row.timestamp ?? "") >= (existing.timestamp ?? "")) {
+      seen.set(key, row);
+    }
+  });
+  const uniqueRows = Array.from(seen.values());
+
   const grouped = new Map<string, SurveyEntry[]>();
 
-  rows.forEach((row) => {
+  uniqueRows.forEach((row) => {
     const room = row.room?.trim() || "Unknown";
     if (!grouped.has(room)) grouped.set(room, []);
     grouped.get(room)!.push(row);

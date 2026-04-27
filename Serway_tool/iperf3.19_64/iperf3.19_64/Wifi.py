@@ -980,6 +980,7 @@ class WifiSurveyApp(ctk.CTk):
                     .eq("room_point", survey_data["room_point"] or "")
                     .eq("note", survey_data["note"] or "")
                     .eq("band", survey_data["band"] or "")
+                    .eq("ssid", survey_data["ssid"] or "")
                     .execute()
                 )
 

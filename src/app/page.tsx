@@ -464,7 +464,23 @@ export default function Dashboard() {
   if (!isClient) return null;
 
   return (
-    <div className="flex min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans">
+    <div className="print-report-root flex min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans print:block print:min-h-0 print:bg-white print:text-gray-900">
+      <style jsx global>{`
+         print {
+           { size: A4 landscape; margin: 10mm; }
+          html, body { width: auto !important; height: auto !important; overflow: visible !important; background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          * { box-shadow: none !important; scrollbar-width: none !important; }
+          *::-webkit-scrollbar { display: none !important; }
+          .print-report-root, .print-report-content, .print-report-main { display: block !important; width: 100% !important; height: auto !important; min-height: 0 !important; overflow: visible !important; background: #fff !important; }
+          .print-report-main { padding: 0 !important; }
+          .recharts-wrapper, .recharts-surface { overflow: visible !important; }
+          .print-chart { height: 240px !important; }
+          .print-card { break-inside: avoid; page-break-inside: avoid; }
+          .overflow-x-auto { overflow: visible !important; }
+          table { width: 100% !important; table-layout: auto !important; font-size: 10px !important; white-space: normal !important; }
+          th, td { padding: 4px 6px !important; white-space: normal !important; word-break: break-word; }
+        }
+      `}</style>
 
       {/* Sidebar Navigation */}
       <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col print:hidden">
@@ -581,7 +597,7 @@ export default function Dashboard() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="print-report-content flex-1 flex flex-col h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
 
         {/* Top Header */}
         <header className="flex-shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-8 py-4 flex items-center justify-between print:hidden">
@@ -620,7 +636,7 @@ export default function Dashboard() {
         )}
 
         {/* Dashboard Area */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 bg-gray-50 dark:bg-gray-950">
+        <main className="print-report-main flex-1 overflow-y-auto p-4 md:p-8 space-y-8 bg-gray-50 dark:bg-gray-950 print:overflow-visible print:bg-white print:p-0 print:space-y-4">
 
           {(!selectedBuilding || !selectedFloor) ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
@@ -635,7 +651,7 @@ export default function Dashboard() {
           ) : (
             <>
               {/* KPI Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 print:break-inside-avoid">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 print-card print:break-inside-avoid">
                 <KpiCard title="Avg RSSI" value={`${avgRssi.toFixed(1)} dBm`} isWarning={avgRssi < -75} />
                 <KpiCard title="Avg Download" value={`${avgTcpDown.toFixed(1)} Mbps`} />
                 <KpiCard title="Avg Upload" value={`${avgTcpUp.toFixed(1)} Mbps`} />
@@ -654,7 +670,7 @@ export default function Dashboard() {
               )}
 
               {/* Smart Summary & Worst Points */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:break-inside-avoid">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print-card print:break-inside-avoid">
                 <Card className="lg:col-span-2 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base text-blue-800 dark:text-blue-300">สรุปผลอัตโนมัติ / ข้อเสนอแนะ</CardTitle>
@@ -700,7 +716,7 @@ export default function Dashboard() {
 
               {/* Traceroute Section */}
               {traceData.length > 0 && (
-                <div className="space-y-6 print:break-inside-avoid pt-6 border-t border-gray-200 dark:border-gray-800">
+                <div className="space-y-6 print-card print:break-inside-avoid pt-6 border-t border-gray-200 dark:border-gray-800">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                       <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -709,7 +725,7 @@ export default function Dashboard() {
                       </h2>
                       <p className="text-gray-500 text-sm mt-1">การวิเคราะห์คุณภาพเครือข่ายแบบ Hop-by-hop</p>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm print:hidden">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Band:</span>
                         <select
@@ -771,7 +787,7 @@ export default function Dashboard() {
                             <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
                               <CardTitle className="text-base">ช่วงความหน่วงเวลาแต่ละจุด (Latency Range)</CardTitle>
                             </CardHeader>
-                            <CardContent className="pt-4 h-[300px]">
+                            <CardContent className="pt-4 h-[300px] print-chart">
                               <TraceRouteLatencyChart data={currentTrace} />
                             </CardContent>
                           </Card>
@@ -781,7 +797,7 @@ export default function Dashboard() {
                               <CardTitle className="text-base">อัตราข้อมูลสูญหายแต่ละจุด (Packet Loss)</CardTitle>
                               <p className="text-xs text-gray-500 mt-1">(Loss ระหว่างทางอาจไม่ใช่ปัญหาของปลายทางเสมอไป)</p>
                             </CardHeader>
-                            <CardContent className="pt-4 h-[250px]">
+                            <CardContent className="pt-4 h-[250px] print-chart">
                               <TraceRouteLossChart data={currentTrace} />
                             </CardContent>
                           </Card>
@@ -808,7 +824,7 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <div className="lg:col-span-1 space-y-6">
-                  <Card className="print:break-inside-avoid">
+                  <Card className="print-card print:break-inside-avoid">
                     <CardHeader>
                       <CardTitle className="text-base">สัดส่วนคุณภาพ (Rating)</CardTitle>
                     </CardHeader>
@@ -829,7 +845,7 @@ export default function Dashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card className="print:break-inside-avoid">
+                  <Card className="print-card print:break-inside-avoid">
                     <CardHeader>
                       <CardTitle className="text-base">สัดส่วนคลื่นความถี่ (Band)</CardTitle>
                     </CardHeader>
@@ -851,7 +867,7 @@ export default function Dashboard() {
                   </Card>
                 </div>
 
-                <Card className="lg:col-span-3 print:break-inside-avoid">
+                <Card className="lg:col-span-3 print-card print:break-inside-avoid">
                   <CardHeader>
                     <CardTitle className="text-base">สัญญาณ (RSSI) แยกตามจุด (เรียงจากแย่ไปดี)</CardTitle>
                   </CardHeader>
@@ -879,7 +895,7 @@ export default function Dashboard() {
               </div>
 
               {/* Throughput */}
-              <Card className="print:break-inside-avoid">
+              <Card className="print-card print:break-inside-avoid">
                 <CardHeader>
                   <CardTitle className="text-base">TCP Download vs Upload (Mbps)</CardTitle>
                 </CardHeader>
@@ -907,12 +923,12 @@ export default function Dashboard() {
 
               {/* Ping & Jitter */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="print:break-inside-avoid">
+                <Card className="print-card print:break-inside-avoid">
                   <CardHeader>
                     <CardTitle className="text-base">Server Ping (ms)</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[350px] w-full">
+                    <div className="print-chart h-[350px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={pingData} margin={{ top: 30, right: 10, left: 0, bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -929,12 +945,12 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
-                <Card className="print:break-inside-avoid">
+                <Card className="print-card print:break-inside-avoid">
                   <CardHeader>
                     <CardTitle className="text-base">UDP Jitter (ms)</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[350px] w-full">
+                    <div className="print-chart h-[350px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={jitterData} margin={{ top: 30, right: 10, left: 0, bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -953,12 +969,12 @@ export default function Dashboard() {
               </div>
 
               {/* Packet Loss */}
-              <Card className="print:break-inside-avoid">
+              <Card className="print-card print:break-inside-avoid">
                 <CardHeader>
                   <CardTitle className="text-base">อัตราข้อมูลสูญหาย (Packet Loss %)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[350px] w-full">
+                  <div className="print-chart h-[350px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={lossData} margin={{ top: 30, right: 30, left: 0, bottom: 40 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -980,7 +996,7 @@ export default function Dashboard() {
               </Card>
 
               {/* Floor Data Tables */}
-              <div className="space-y-6 pt-2 print:break-inside-avoid">
+              <div className="space-y-6 pt-2 print-card print:break-inside-avoid">
                 <Card className="shadow-sm border-gray-200 dark:border-gray-800 overflow-hidden">
                   <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-3">
                     <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -1163,7 +1179,7 @@ function BandComparisonSection({ entries, selectedNote, onNoteChange }: { entrie
   }
 
   return (
-    <div className="space-y-4 print:break-inside-avoid">
+    <div className="space-y-4 print-card print:break-inside-avoid">
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">

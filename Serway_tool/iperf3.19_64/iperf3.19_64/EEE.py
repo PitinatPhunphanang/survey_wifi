@@ -412,6 +412,20 @@ class WifiSurveyApp(ctk.CTk):
             return "5 GHz"
         return "Unknown"
 
+    def lookup_ap_vendor(self, bssid):
+        """Look up AP vendor/brand from BSSID using macvendors API."""
+        if not bssid or bssid == "Unknown":
+            return "Unknown"
+        try:
+            oui = bssid.replace("-", ":").upper()[:8]
+            import urllib.request
+            url = f"https://api.macvendors.com/{oui}"
+            req = urllib.request.Request(url, headers={"User-Agent": "WifiSurveyApp/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.read().decode("utf-8").strip()
+        except Exception:
+            return "Unknown"
+
     # =========================
     # ROUTING / PING
     # =========================

@@ -93,6 +93,7 @@ const mapSurveyRow = (row: any): SurveyEntry => ({
   room: String(row.room_point ?? ""),
   note: row.note ?? "",
   ssid: row.ssid ?? "",
+  apVendor: row.ap_vendor ?? "",
   bssid: row.bssid ?? "",
   band: row.band ?? "",
   radioType: row.radio_type ?? "",
@@ -1079,6 +1080,7 @@ export default function Dashboard() {
                             <th className="px-4 py-3">เวลา</th>
                             <th className="px-4 py-3">จุดทดสอบ</th>
                             <th className="px-4 py-3">SSID</th>
+                            <th className="px-4 py-3">AP Vendor</th>
                             <th className="px-4 py-3">Band</th>
                             <th className="px-4 py-3">RSSI</th>
                             <th className="px-4 py-3">Ping</th>
@@ -1100,6 +1102,7 @@ export default function Dashboard() {
                                 <td className="px-4 py-3 text-xs text-gray-500">{point.timestamp || "-"}</td>
                                 <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{point.note || point.room}</td>
                                 <td className="px-4 py-3">{point.ssid || "-"}</td>
+                                <td className="px-4 py-3 text-xs">{(point as any).apVendor || "-"}</td>
                                 <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${bandColor.bg} ${bandColor.text}`}>{normalizeBand(point.band)}</span></td>
                                 <td className="px-4 py-3">{safeNum(point.rssi).toFixed(1)} dBm</td>
                                 <td className="px-4 py-3">{safeNum(point.pingServerMs).toFixed(1)} ms</td>

@@ -25,6 +25,7 @@ const mapSurveyRow = (row: any): RawSurveyEntry => ({
   point: String(row.point ?? row.point_no ?? row.survey_point ?? row.note ?? ""),
   note: row.note ?? "",
   ssid: row.ssid ?? "",
+  apVendor: row.ap_vendor ?? "",
   bssid: row.bssid ?? "",
   band: row.band ?? null,
   radioType: row.radio_type ?? "",
@@ -434,6 +435,7 @@ export default function SearchPage() {
                         </button>
                       </th>
                       <th className="px-4 py-3">SSID</th>
+                      <th className="px-4 py-3">AP Vendor</th>
                       <th className="px-4 py-3">Band</th>
                       <th className="px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
                         <button
@@ -482,7 +484,7 @@ export default function SearchPage() {
                   <tbody>
                     {sortedData.length === 0 ? (
                       <tr>
-                        <td colSpan={15} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={16} className="px-4 py-8 text-center text-gray-500">
                           ไม่พบข้อมูลที่ตรงกับเกณฑ์การค้นหา
                         </td>
                       </tr>
@@ -507,6 +509,7 @@ export default function SearchPage() {
                             <td className="px-4 py-3 font-medium">{entry.point || "-"}</td>
                             <td className="px-4 py-3 text-xs">{entry.note || "-"}</td>
                             <td className="px-4 py-3 text-xs">{entry.ssid || "-"}</td>
+                            <td className="px-4 py-3 text-xs">{(entry as any).apVendor || "-"}</td>
                             <td className="px-4 py-3">
                               <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${bandColor.bg} ${bandColor.text}`}>
                                 {normalizeBand(entry.band)}

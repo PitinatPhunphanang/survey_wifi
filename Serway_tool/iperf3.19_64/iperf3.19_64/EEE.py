@@ -37,7 +37,7 @@ find_and_load_env()
 SERVER_IP = "10.8.1.93"
 IPERF_PORT = 5202
 IPERF_DURATION = 10
-UDP_BANDWIDTH = "20M"
+#UDP_BANDWIDTH = "20M"
 PING_COUNT = 4
 MAX_HOPS = 15
 TRACERT_TIMEOUT = 500
@@ -98,7 +98,7 @@ class WifiSurveyApp(ctk.CTk):
         ctk.CTkLabel(left_panel, text="Wi-Fi Survey Pro", font=("Arial", 24, "bold")).pack(pady=(20, 2))
         ctk.CTkLabel(
             left_panel,
-            text=f"iPerf: {IPERF_DURATION}s | UDP: {UDP_BANDWIDTH} | Port: {IPERF_PORT}",
+            text=f"iPerf Duration: {IPERF_DURATION}s | Port: {IPERF_PORT}",
             font=("Arial", 11),
             text_color="gray",
         ).pack(pady=(0, 10))
@@ -836,27 +836,27 @@ class WifiSurveyApp(ctk.CTk):
         except Exception:
             return None
 
-    def parse_iperf_udp(self, data):
-        udp_mbps = None
-        jitter = None
-        loss = None
+    #def parse_iperf_udp(self, data):
+    #    udp_mbps = None
+    #    jitter = None
+    #    loss = None
 
-        try:
-            udp_mbps = round(data["end"]["sum"]["bits_per_second"] / 1e6, 2)
-        except Exception:
-            pass
+    #    try:
+    #        udp_mbps = round(data["end"]["sum"]["bits_per_second"] / 1e6, 2)
+    #    except Exception:
+    #        pass
 
-        try:
-            jitter = round(data["end"]["sum"]["jitter_ms"], 2)
-        except Exception:
-            pass
+    #    try:
+    #        jitter = round(data["end"]["sum"]["jitter_ms"], 2)
+    #    except Exception:
+    #        pass
 
-        try:
-            loss = round(data["end"]["sum"]["lost_percent"], 2)
-        except Exception:
-            pass
+    #    try:
+    #        loss = round(data["end"]["sum"]["lost_percent"], 2)
+    #    except Exception:
+    #        pass
 
-        return udp_mbps, jitter, loss
+    #    return udp_mbps, jitter, loss
 
     # =========================
     # RATING
@@ -870,8 +870,8 @@ class WifiSurveyApp(ctk.CTk):
                 and upload >= 50
                 and download is not None
                 and download >= 50
-                and loss is not None
-                and loss < 1
+                #and loss is not None
+                #and loss < 1
                 and ping_server is not None
                 and ping_server <= 20
             ):
@@ -978,10 +978,10 @@ class WifiSurveyApp(ctk.CTk):
                     "ping_server_loss_pct": self.sanitize_db_value(row.get("Ping_Server_Loss_%")),
                     "tcp_upload_mbps": self.sanitize_db_value(row.get("TCP_Upload_Mbps")),
                     "tcp_download_mbps": self.sanitize_db_value(row.get("TCP_Download_Mbps")),
-                    "udp_target_bandwidth": self.sanitize_db_value(row.get("UDP_Target_Bandwidth")),
-                    "udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
-                    "udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
-                    "udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
+                    #"udp_target_bandwidth": self.sanitize_db_value(row.get("UDP_Target_Bandwidth")),
+                    #"udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
+                    #"udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
+                    #"udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
                     "rating": self.sanitize_db_value(row.get("Rating")),
                     "ap_vendor": self.sanitize_db_value(row.get("AP_Vendor")),
                 }
@@ -1110,19 +1110,19 @@ class WifiSurveyApp(ctk.CTk):
         tcp_down_data = self.run_iperf(server_ip, ["-t", str(IPERF_DURATION), "-R"], "TCP Download")
         download_mbps = self.parse_iperf_tcp_download(tcp_down_data)
 
-        udp_mbps = None
-        jitter_ms = None
-        packet_loss_pct = None
-        udp_error = None
-        try:
-            udp_data = self.run_iperf(
-                server_ip,
-                ["-u", "-b", UDP_BANDWIDTH, "-t", str(IPERF_DURATION)],
-                "UDP Jitter/Loss",
-            )
-            udp_mbps, jitter_ms, packet_loss_pct = self.parse_iperf_udp(udp_data)
-        except Exception as exc:
-            udp_error = str(exc)
+        #udp_mbps = None
+        #jitter_ms = None
+        #packet_loss_pct = None
+        #udp_error = None
+        #try:
+        #    udp_data = self.run_iperf(
+        #        server_ip,
+        #        ["-u", "-b", UDP_BANDWIDTH, "-t", str(IPERF_DURATION)],
+        #        "UDP Jitter/Loss",
+        #    )
+        #    udp_mbps, jitter_ms, packet_loss_pct = self.parse_iperf_udp(udp_data)
+        #except Exception as exc:
+        #    udp_error = str(exc)
 
         if "Detailed" in diag_mode:
             resolve_hostname = True
@@ -1182,7 +1182,8 @@ class WifiSurveyApp(ctk.CTk):
             wlan["RSSI_dBm"],
             upload_mbps,
             download_mbps,
-            packet_loss_pct,
+            #packet_loss_pct,
+            None,
             ping_srv_ms,
         )
 
@@ -1210,10 +1211,10 @@ class WifiSurveyApp(ctk.CTk):
             "Ping_Server_Loss_%": [ping_srv_loss],
             "TCP_Upload_Mbps": [upload_mbps],
             "TCP_Download_Mbps": [download_mbps],
-            "UDP_Target_Bandwidth": [UDP_BANDWIDTH],
-            "UDP_Actual_Mbps": [udp_mbps],
-            "UDP_Jitter_ms": [jitter_ms],
-            "UDP_PacketLoss_%": [packet_loss_pct],
+            #"UDP_Target_Bandwidth": [UDP_BANDWIDTH],
+            #"UDP_Actual_Mbps": [udp_mbps],
+            #"UDP_Jitter_ms": [jitter_ms],
+            #"UDP_PacketLoss_%": [packet_loss_pct],
             "CoChannel_AP_Count": [channel_quality["CoChannel_AP_Count"]],
             "Adjacent_AP_Count": [channel_quality["Adjacent_AP_Count"]],
             "Strongest_Neighbor_RSSI": [channel_quality["Strongest_Neighbor_RSSI"]],
@@ -1271,10 +1272,10 @@ class WifiSurveyApp(ctk.CTk):
             "ping_srv_loss": ping_srv_loss,
             "upload_mbps": upload_mbps,
             "download_mbps": download_mbps,
-            "udp_mbps": udp_mbps,
-            "jitter_ms": jitter_ms,
-            "packet_loss_pct": packet_loss_pct,
-            "udp_error": udp_error,
+            #"udp_mbps": udp_mbps,
+            #"jitter_ms": jitter_ms,
+            #"packet_loss_pct": packet_loss_pct,
+            #"udp_error": udp_error,
             "rating": rating,
             "ap_vendor": ap_vendor,
             "tracert_hops": tracert_hops,
@@ -1305,12 +1306,12 @@ class WifiSurveyApp(ctk.CTk):
             trace_str += f"{'-' * 74}\n"
 
         wlan = result["wlan"]
-        udp_error = result.get("udp_error")
-        udp_actual_display = result["udp_mbps"] if result["udp_mbps"] is not None else "N/A"
-        udp_jitter_display = result["jitter_ms"] if result["jitter_ms"] is not None else "N/A"
-        udp_loss_display = (
-            f"{result['packet_loss_pct']}%" if result["packet_loss_pct"] is not None else "N/A"
-        )
+        #udp_error = result.get("udp_error")
+        #udp_actual_display = result["udp_mbps"] if result["udp_mbps"] is not None else "N/A"
+        #udp_jitter_display = result["jitter_ms"] if result["jitter_ms"] is not None else "N/A"
+        #udp_loss_display = (
+        #    f"{result['packet_loss_pct']}%" if result["packet_loss_pct"] is not None else "N/A"
+        #)
         cq = result.get("channel_quality", {})
 
         result_text = (
@@ -1337,9 +1338,9 @@ class WifiSurveyApp(ctk.CTk):
             f"{'-' * 58}\n"
             f"  TCP Upload      : {result['upload_mbps']} Mbps\n"
             f"  TCP Download    : {result['download_mbps']} Mbps\n"
-            f"  UDP Actual      : {udp_actual_display}\n"
-            f"  UDP Jitter      : {udp_jitter_display}\n"
-            f"  UDP Loss        : {udp_loss_display}\n"
+            #f"  UDP Actual      : {udp_actual_display}\n"
+            #f"  UDP Jitter      : {udp_jitter_display}\n"
+            #f"  UDP Loss        : {udp_loss_display}\n"
             f"{'-' * 58}\n"
             f"  Co-Channel APs  : {cq.get('CoChannel_AP_Count', 0)}\n"
             f"  Adjacent APs    : {cq.get('Adjacent_AP_Count', 0)}\n"
@@ -1352,8 +1353,8 @@ class WifiSurveyApp(ctk.CTk):
             f"{'=' * 58}\n"
         )
 
-        if udp_error:
-            result_text += f"\nUDP Warning:\n{udp_error}\n"
+        #if udp_error:
+        #    result_text += f"\nUDP Warning:\n{udp_error}\n"
 
         self.set_result_text(result_text)
         self.entry_room.delete(0, "end")

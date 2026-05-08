@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
-
+import platform
 from dotenv import load_dotenv
 
 import customtkinter as ctk
@@ -68,9 +68,9 @@ class WifiSurveyApp(ctk.CTk):
         self.geometry("1300x900")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-
-        self.iperf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iperf3.exe")
         self._test_running = False
+        self.os_type = "Linux"
+        self.iperf_path = "iperf3"
 
         # Spectrum-related cache
         self.wifi_cache = {}
@@ -306,58 +306,45 @@ class WifiSurveyApp(ctk.CTk):
     # =========================
     def get_wlan_info(self):
         info = {
-            "SSID": "Unknown",
-            "BSSID": "Unknown",
-            "Band": "Unknown",
-            "Channel": "Unknown",
-            "Radio_Type": "Unknown",
-            "Receive_Rate_Mbps": None,
-            "Transmit_Rate_Mbps": None,
-            "Signal_%": None,
-            "RSSI_dBm": None,
+            "SSID": "Unknown", "BSSID": "Unknown", "Band": "Unknown", "Channel": "Unknown",
+            "Radio_Type": "Unknown", "Receive_Rate_Mbps": None, "Transmit_Rate_Mbps": None,
+            "Signal_%": None, "RSSI_dBm": None,
         }
-
         try:
-            result = self.run_command(["netsh", "wlan", "show", "interfaces"], timeout=8)
-            text = result.stdout
-            pairs = []
+            # ใช้พารามิเตอร์ -t (terse) เพื่อให้ดึงข้อมูลออกมาเป็นบรรทัดเดียวคั่นด้วย :
+            res = self.run_command(["nmcli", "-t", "-f", "ACTIVE,SSID,BSSID,CHAN,RATE,SIGNAL", "device", "wifi"])
+            
+            for line in res.stdout.splitlines():
+                if line.startswith("yes"):
+                    # แก้ปัญหา BSSID มีเครื่องหมาย : โดยการหลบค่า \: ไปก่อน
+                    p = line.replace('\\:', '++').split(':')
+                    
+                    if len(p) >= 6:
+                        info["SSID"] = p[1] if p[1] else "Hidden"
+                        # ดึงค่ากลับมาเป็นรูปแบบ MAC address ปกติ
+                        info["BSSID"] = p[2].replace('++', ':')
+                        info["Channel"] = p[3]
+                        
+                        # ดึงเฉพาะตัวเลขความเร็ว
+                        rate_match = re.search(r'\d+', p[4])
+                        info["Receive_Rate_Mbps"] = float(rate_match.group()) if rate_match else None
+                        info["Transmit_Rate_Mbps"] = info["Receive_Rate_Mbps"]
+                        
+                        info["Signal_%"] = int(p[5])
+                        # แยก Band จาก Channel
+                        try:
+                            info["Band"] = "5 GHz" if int(p[3]) > 14 else "2.4 GHz"
+                        except:
+                            info["Band"] = "Unknown"
 
-            for raw_line in text.splitlines():
-                line = raw_line.strip()
-                if ":" not in line:
-                    continue
-                key, value = line.split(":", 1)
-                pairs.append((self.normalize_key(key), value.strip()))
-
-            info["SSID"] = self.find_interface_value(pairs, ["ssid"]) or info["SSID"]
-            info["BSSID"] = self.find_interface_value(pairs, ["apbssid", "bssid"]) or info["BSSID"]
-            info["Band"] = self.find_interface_value(pairs, ["band"]) or info["Band"]
-            info["Channel"] = self.find_interface_value(pairs, ["channel"]) or info["Channel"]
-            info["Radio_Type"] = self.find_interface_value(pairs, ["radiotype"]) or info["Radio_Type"]
-
-            rx_rate = self.find_interface_value(pairs, ["receiveratembps", "receiverate(mbps)"])
-            tx_rate = self.find_interface_value(pairs, ["transmitratembps", "transmitrate(mbps)"])
-            signal = self.find_interface_value(pairs, ["signal"])
-            rssi = self.find_interface_value(pairs, ["rssi"])
-
-            info["Receive_Rate_Mbps"] = self.parse_float(rx_rate)
-            info["Transmit_Rate_Mbps"] = self.parse_float(tx_rate)
-            info["Signal_%"] = self.parse_percent(signal)
-            info["RSSI_dBm"] = self.parse_float(rssi)
-
-            if info["BSSID"] == "Unknown":
-                info["BSSID"] = self.find_mac_address(text) or info["BSSID"]
-
+            # คำนวณ RSSI จากเปอร์เซ็นต์สัญญาณ (สูตรมาตรฐาน Linux)
             if info["RSSI_dBm"] is None and info["Signal_%"] is not None:
                 info["RSSI_dBm"] = round((info["Signal_%"] / 2) - 100, 1)
-
-            if info["Band"] == "Unknown":
-                info["Band"] = self.infer_band_from_channel(info["Channel"])
-        except Exception:
-            pass
-
+                
+        except Exception as e: 
+            print(f"Error in get_wlan_info: {e}")
+            
         return info
-
     def normalize_key(self, value):
         return re.sub(r"[^a-z0-9()%]", "", str(value).strip().lower())
 
@@ -404,125 +391,43 @@ class WifiSurveyApp(ctk.CTk):
     # =========================
     def get_default_gateway(self):
         try:
-            result = self.run_command(["route", "print", "-4"], timeout=8)
-            best_gateway = None
-            best_metric = None
-
-            for raw_line in result.stdout.splitlines():
-                line = raw_line.strip()
-                match = re.match(
-                    r"^0\.0\.0\.0\s+0\.0\.0\.0\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d+)$",
-                    line,
-                )
-                if not match:
-                    continue
-
-                gateway = match.group(1)
-                metric = int(match.group(3))
-
-                if best_metric is None or metric < best_metric:
-                    best_gateway = gateway
-                    best_metric = metric
-
-            return best_gateway or "Unknown"
-        except Exception:
-            return "Unknown"
+                result = self.run_command(["ip", "route", "show", "default"], timeout=5)
+                match = re.search(r"default via ([\d.]+)", result.stdout)
+                return match.group(1) if match else "Unknown"
+        except Exception: return "Unknown"
 
     def ping_host(self, host, count=4):
         stats = self.ping_for_stats(host, count=count)
         return stats["Avg"], stats["Loss_%"]
 
     def ping_for_stats(self, host, count=10):
-        if not host or host in ("Unknown", "Timeout", "Unreachable"):
-            return {"Min": None, "Max": None, "Avg": None, "Loss_%": None}
-
-        host_escaped = self.powershell_escape(host)
-        script = (
-            "$ProgressPreference='SilentlyContinue'; "
-            f"$r = Test-Connection -Count {int(count)} -ComputerName '{host_escaped}' -ErrorAction SilentlyContinue | "
-            "Select-Object ResponseTime; "
-            "if ($r) { $r | ConvertTo-Json -Compress }"
-        )
-
-        try:
-            data = self.run_powershell_json(script, timeout=max(10, count * 3))
-            if not data:
-                return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
-
-            if isinstance(data, dict):
-                data = [data]
-
-            times = [int(item["ResponseTime"]) for item in data if item.get("ResponseTime") is not None]
-            success_count = len(times)
-            loss_pct = round(((count - success_count) / count) * 100) if count else None
-
-            if not times:
-                return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
-
-            return {
-                "Min": min(times),
-                "Max": max(times),
-                "Avg": round(sum(times) / len(times)),
-                "Loss_%": loss_pct,
-            }
-        except Exception:
+        if not host or host in ("Unknown", "Timeout"):
             return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
+        try:
+                res = self.run_command(["ping", "-c", str(count), host])
+                stats = re.search(r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)", res.stdout)
+                loss = re.search(r"(\d+)% packet loss", res.stdout)
+                if stats: return {"Min": float(stats.group(1)), "Avg": float(stats.group(2)), "Max": float(stats.group(3)), "Loss_%": int(loss.group(1))}
+        except Exception: pass
+        return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
 
     # =========================
     # TRACEROUTE
     # =========================
     def run_traceroute(self, host, max_hops=10, timeout_ms=500, resolve_hostname=False):
         hops = []
-
         try:
-            cmd = ["tracert", "-h", str(max_hops), "-w", str(timeout_ms)]
-            if not resolve_hostname:
-                cmd.append("-d")
-            cmd.append(host)
+                # Linux traceroute (requires 'traceroute' package)
+                cmd = ["traceroute", "-m", str(max_hops), "-w", "1"]
+                if not resolve_hostname: cmd.append("-n")
+                cmd.append(host)
 
-            result = self.run_command(cmd, timeout=max(20, max_hops * 6))
-
-            for raw_line in result.stdout.splitlines():
-                line = raw_line.strip()
-                hop_match = re.match(r"^(\d+)\s+(.*)$", line)
-                if not hop_match:
-                    continue
-
-                hop_num = hop_match.group(1)
-                rest = hop_match.group(2)
-
-                ip = "Unknown"
-                hostname = ""
-
-                ip_bracket = re.search(r"([^\s]+)\s+\[(\d{1,3}(?:\.\d{1,3}){3})\]", rest)
-                if ip_bracket:
-                    hostname = ip_bracket.group(1)
-                    ip = ip_bracket.group(2)
-                else:
-                    ip_match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", rest)
-                    if ip_match:
-                        ip = ip_match.group(1)
-                    elif rest.count("*") >= 3:
-                        ip = "Timeout"
-
-                times = re.findall(r"((?:<\s*1|\d+)\s*ms|\*)", rest, re.IGNORECASE)
-                t1 = times[0] if len(times) > 0 else "*"
-                t2 = times[1] if len(times) > 1 else "*"
-                t3 = times[2] if len(times) > 2 else "*"
-
-                hops.append(
-                    {
-                        "Hop": hop_num,
-                        "RTT1": t1.replace(" ", ""),
-                        "RTT2": t2.replace(" ", ""),
-                        "RTT3": t3.replace(" ", ""),
-                        "IP": ip,
-                        "Hostname": hostname,
-                    }
-                )
-        except Exception:
-            pass
-
+                result = self.run_command(cmd, timeout=30)
+                for line in result.stdout.splitlines():
+                    hop_match = re.search(r"^\s*(\d+)\s+.*([\d.]{7,15}|Timeout|\*)", line)
+                    if hop_match:
+                        hops.append({"Hop": hop_match.group(1), "IP": hop_match.group(2)})
+        except Exception: pass
         return hops
 
     def run_pingplotter_style(self, host, max_hops=10, timeout_ms=500, ping_count=10, resolve_hostname=False):
@@ -568,66 +473,50 @@ class WifiSurveyApp(ctk.CTk):
     # SPECTRUM / WIFI SCAN
     # =========================
     def scan_wifi_live(self):
-        """
-        Scan nearby Wi-Fi and cache nearby AP info for spectrum drawing.
-        Saved locally only. Not sent to Supabase.
-        """
         now = time.time()
-
         try:
-            self.run_command(["netsh", "wlan", "scan"], timeout=10)
-            time.sleep(1.5)
-
-            result = self.run_command(
-                ["netsh", "wlan", "show", "networks", "mode=bssid"],
-                timeout=15,
+            # สั่ง rescan (ต้องใช้ sudo หรือสิทธิ์ user ที่เหมาะสม)
+            subprocess.run(["nmcli", "device", "wifi", "rescan"], stderr=subprocess.DEVNULL)
+            
+            # ใช้ --terse และ --fields โดยระบุตัวคั่นเป็นอย่างอื่น (เช่น '|') จะปลอดภัยกว่า
+            # หรือถ้าจะใช้แบบเดิม ต้องแก้วิธี split
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SIGNAL,FREQ", "device", "wifi"],
+                capture_output=True, text=True, encoding='utf-8'
             )
             out = result.stdout
 
-            blocks = re.findall(r"SSID\s+\d+\s*:.*?(?=\nSSID|\Z)", out, re.S)
-
-            for block in blocks:
-                ssid_match = re.search(r"SSID\s+\d+\s*:\s*(.*)", block)
-                ssid = ssid_match.group(1).strip() if ssid_match else "Hidden"
-
-                bss_list = re.findall(
-                    r"BSSID\s+\d+\s*:\s*([0-9a-f:]+).*?"
-                    r"Signal\s*:\s*(\d+)%.*?"
-                    r"(?:Band\s*:\s*([\d.]+)\s*GHz)?.*?"
-                    r"Channel\s*:\s*(\d+)",
-                    block,
-                    re.S | re.I,
-                )
-
-                for mac, sig, band, ch in bss_list:
-                    try:
-                        ch_int = int(ch)
-                    except Exception:
-                        continue
-
-                    if band:
-                        band_val = float(band)
-                    else:
-                        band_val = 5.0 if ch_int > 14 else 2.4
-
-                    rssi = round((int(sig) / 2) - 100, 1)
-
-                    self.wifi_cache[mac.lower()] = {
-                        "ssid": ssid if ssid else "Hidden",
-                        "band": band_val,
-                        "ch": ch_int,
-                        "rssi": rssi,
-                        "updated": now,
+            for line in out.strip().split('\n'):
+                if not line: continue
+                try:
+                    # แก้ปัญหา BSSID มีเครื่องหมาย : โดยการหาจุดที่โดน escape (\:)
+                    # nmcli แบบ -t จะส่งมาเป็น SSID:BSSID:CHAN:SIGNAL:FREQ
+                    # แต่ BSSID จะเป็น AA\:BB\:CC...
+                    parts = line.replace('\\:', '++').split(':')
+                    if len(parts) < 5: continue
+                    
+                    ssid = parts[0]
+                    mac = parts[1].replace('++', ':').lower()
+                    channel = int(parts[2])
+                    signal = int(parts[3])
+                    freq_val = int(re.search(r'\d+', parts[4]).group()) # ดึงเฉพาะตัวเลข
+                    
+                    # คำนวณ RSSI: nmcli ให้ signal เป็น % (0-100)
+                    # สูตรแปลง % เป็น dBm ประมาณ: (signal / 2) - 100
+                    rssi_dbm = (signal / 2) - 100
+                    
+                    self.wifi_cache[mac] = {
+                        "ssid": ssid or "Hidden",
+                        "ch": channel,
+                        "rssi": rssi_dbm,
+                        "band": 5.0 if freq_val > 3000 else 2.4,
+                        "updated": now
                     }
-
-            for key in list(self.wifi_cache.keys()):
-                if now - self.wifi_cache[key]["updated"] > SPECTRUM_CACHE_TIMEOUT:
-                    del self.wifi_cache[key]
-
-        except Exception:
-            pass
-
-        return self.wifi_cache
+                except Exception as e:
+                    print(f"Parsing error: {e}") # สำหรับ debug
+                    continue
+        except Exception as e:
+            print(f"Scan error: {e}")
 
     def analyze_channel_quality(self, connected_channel):
         same_channel = 0
@@ -758,10 +647,12 @@ class WifiSurveyApp(ctk.CTk):
     def run_iperf(self, server_ip, args, label):
         self.set_status(f"Running {label}...", "yellow")
 
-        if not os.path.exists(self.iperf_path):
-            raise FileNotFoundError(f"iperf3.exe was not found at: {self.iperf_path}")
-
+        # --- แก้ไขจุดที่ 1: ตัดการเช็ค os.path.exists ออก ---
+        # บน Linux เราเรียก 'iperf3' ตรงๆ ระบบจะหาจาก /usr/bin/ เอง 
+        # การใช้ os.path.exists จะทำให้มันหาไม่เจอถ้าเราไม่ได้วางไฟล์ไว้ในโฟลเดอร์โปรแกรม
+        
         try:
+            # ใช้ self.iperf_path ซึ่งควรมีค่าเป็น "iperf3" สำหรับ Linux
             proc = self.run_command(
                 [self.iperf_path, "-c", server_ip, "-p", str(IPERF_PORT), "-4"] + args + ["--json"],
                 timeout=max(40, IPERF_DURATION + 20),
@@ -770,10 +661,11 @@ class WifiSurveyApp(ctk.CTk):
             stdout = proc.stdout.strip()
             stderr = proc.stderr.strip()
 
+            # --- แก้ไขจุดที่ 2: ปรับ Error Message ไม่ให้ระบุว่าเป็น .exe ---
             if proc.returncode != 0 and not stdout:
                 raise RuntimeError(
                     f"iPerf3 ({label}) failed.\n"
-                    f"Command: iperf3.exe -c {server_ip} -p {IPERF_PORT} -4 {' '.join(args)} --json\n"
+                    f"Command: {self.iperf_path} -c {server_ip} -p {IPERF_PORT} -4 {' '.join(args)} --json\n"
                     f"stderr: {stderr or '-'}"
                 )
 
@@ -786,7 +678,7 @@ class WifiSurveyApp(ctk.CTk):
                 preview = stdout[:500]
                 raise RuntimeError(
                     f"iPerf3 ({label}) returned invalid JSON.\n"
-                    f"Command: iperf3.exe -c {server_ip} -p {IPERF_PORT} -4 {' '.join(args)} --json\n"
+                    f"Command: {self.iperf_path} -c {server_ip} -p {IPERF_PORT} -4 {' '.join(args)} --json\n"
                     f"stdout preview: {preview}"
                 ) from exc
 
@@ -794,6 +686,9 @@ class WifiSurveyApp(ctk.CTk):
                 raise RuntimeError(f"iPerf3 ({label}): {data['error']}")
 
             return data
+        except FileNotFoundError:
+            # กรณีที่ในเครื่องไม่ได้ติดตั้ง iperf3 ไว้เลย
+            raise RuntimeError(f"ไม่พบคำสั่ง '{self.iperf_path}' ในระบบ กรุณาติดตั้งด้วย 'sudo apt install iperf3'")
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"iPerf3 ({label}) timed out.") from exc
 

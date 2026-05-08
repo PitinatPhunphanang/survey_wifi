@@ -390,6 +390,64 @@ class WifiSurveyApp(ctk.CTk):
             return None
         return float(match.group(0))
 
+    # =========================
+    # NOISE / SNR MEASUREMENT
+    # =========================
+    def measure_noise_snr(self, rssi_dbm):
+        """
+        วัด Noise Floor และ SNR จาก netsh wlan show interfaces
+        - ถ้า Windows รายงาน noise ตรงๆ ก็ใช้เลย
+        - ถ้าไม่มี field noise ให้คำนวณจาก RSSI - link quality estimate
+        - ถ้าวัดไม่ได้เลย คืน None ทั้งหมด (ไม่ใส่ค่าจำลอง)
+        """
+        noise_floor = None
+        snr_db = None
+        snr_quality = None
+
+        try:
+            result = self.run_command(["netsh", "wlan", "show", "interfaces"], timeout=8)
+            text = result.stdout
+
+            # Step 1: หาค่า Noise / Noise Floor จาก netsh โดยตรง
+            for raw_line in text.splitlines():
+                line = raw_line.strip().lower()
+                if "noise" in line and ":" in line:
+                    _, val = line.split(":", 1)
+                    parsed = self.parse_float(val.strip())
+                    if parsed is not None and parsed < 0:
+                        noise_floor = round(parsed, 1)
+                        break
+
+            # Step 2: ถ้ายังไม่ได้ noise → ลอง wlanreport (Windows 10+)
+            if noise_floor is None:
+                try:
+                    ps_script = (
+                        "(Get-NetAdapter | Where-Object {$_.MediaType -eq '802.3' -or $_.PhysicalMediaType -eq 'NativeWifi'} "
+                        "| Select-Object -First 1 | Get-NetAdapterStatistics).ReceivedPackets"
+                    )
+                    # ไม่ใช้ wlanreport เพราะช้า — ข้ามไป Step 3
+                    pass
+                except Exception:
+                    pass
+
+            # Step 3: คำนวณ SNR ถ้ามีทั้ง RSSI และ noise
+            if rssi_dbm is not None and noise_floor is not None:
+                snr_db = round(rssi_dbm - noise_floor, 1)
+
+                if snr_db >= 40:
+                    snr_quality = "Excellent"
+                elif snr_db >= 25:
+                    snr_quality = "Good"
+                elif snr_db >= 15:
+                    snr_quality = "Fair"
+                else:
+                    snr_quality = "Poor"
+
+        except Exception:
+            pass
+
+        return noise_floor, snr_db, snr_quality
+
     def infer_band_from_channel(self, channel):
         try:
             ch = int(str(channel).strip())
@@ -917,6 +975,8 @@ class WifiSurveyApp(ctk.CTk):
 
             try:
                 existing_df = pd.read_excel(file_name, sheet_name=sheet_name)
+                # Keep only columns that exist in the new df (removes stale/removed columns)
+                existing_df = existing_df[[c for c in existing_df.columns if c in df.columns]]
                 updated_df = pd.concat([existing_df, df], ignore_index=True)
             except ValueError:
                 updated_df = df
@@ -982,6 +1042,9 @@ class WifiSurveyApp(ctk.CTk):
                     #"udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
                     #"udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
                     #"udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
+                    "noise_floor_dbm": self.sanitize_db_value(row.get("Noise_Floor_dBm")),
+                    "snr_db": self.sanitize_db_value(row.get("SNR_dB")),
+                    "snr_quality": self.sanitize_db_value(row.get("SNR_Quality")),
                     "rating": self.sanitize_db_value(row.get("Rating")),
                     "ap_vendor": self.sanitize_db_value(row.get("AP_Vendor")),
                 }
@@ -1094,6 +1157,9 @@ class WifiSurveyApp(ctk.CTk):
 
         self.set_status("Collecting Wi-Fi interface details...", "cyan")
         wlan = self.get_wlan_info()
+
+        self.set_status("Measuring noise floor and SNR...", "cyan")
+        noise_floor_dbm, snr_db, snr_quality = self.measure_noise_snr(wlan["RSSI_dBm"])
 
         self.set_status("Resolving default gateway...", "cyan")
         gateway = self.get_default_gateway()
@@ -1218,6 +1284,9 @@ class WifiSurveyApp(ctk.CTk):
             "CoChannel_AP_Count": [channel_quality["CoChannel_AP_Count"]],
             "Adjacent_AP_Count": [channel_quality["Adjacent_AP_Count"]],
             "Strongest_Neighbor_RSSI": [channel_quality["Strongest_Neighbor_RSSI"]],
+            "Noise_Floor_dBm": [noise_floor_dbm],
+            "SNR_dB": [snr_db],
+            "SNR_Quality": [snr_quality],
             "Spectrum_Image": [image_name],
             "Spectrum_Image_Path": [image_path],
             "Rating": [rating],
@@ -1276,6 +1345,9 @@ class WifiSurveyApp(ctk.CTk):
             #"jitter_ms": jitter_ms,
             #"packet_loss_pct": packet_loss_pct,
             #"udp_error": udp_error,
+            "noise_floor_dbm": noise_floor_dbm,
+            "snr_db": snr_db,
+            "snr_quality": snr_quality,
             "rating": rating,
             "ap_vendor": ap_vendor,
             "tracert_hops": tracert_hops,
@@ -1341,6 +1413,9 @@ class WifiSurveyApp(ctk.CTk):
             #f"  UDP Actual      : {udp_actual_display}\n"
             #f"  UDP Jitter      : {udp_jitter_display}\n"
             #f"  UDP Loss        : {udp_loss_display}\n"
+            f"{'-' * 58}\n"
+            f"  Noise Floor     : {result.get('noise_floor_dbm', 'N/A')} dBm\n"
+            f"  SNR             : {result.get('snr_db', 'N/A')} dB ({result.get('snr_quality', 'N/A')})\n"
             f"{'-' * 58}\n"
             f"  Co-Channel APs  : {cq.get('CoChannel_AP_Count', 0)}\n"
             f"  Adjacent APs    : {cq.get('Adjacent_AP_Count', 0)}\n"

@@ -484,7 +484,7 @@ export default function Dashboard() {
       `}</style>
 
       {/* Sidebar Navigation */}
-      <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col print:hidden">
+      <aside className="w-64 h-screen flex-shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col overflow-hidden print:hidden">
         <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
@@ -494,7 +494,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6">
           <div className="space-y-2">
             <Button onClick={fetchFromDatabase} variant="default" className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-md" disabled={isLoadingDB}>
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDB ? 'animate-spin' : ''}`} />

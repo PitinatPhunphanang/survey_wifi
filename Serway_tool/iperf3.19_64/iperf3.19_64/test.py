@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
-import platform
+
 from dotenv import load_dotenv
 
 import customtkinter as ctk
@@ -21,7 +21,7 @@ from supabase import Client, create_client
 def find_and_load_env():
     """Search for .env.local in parent directories and load it."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(5):  # Check up to 5 parent directories
+    for _ in range(5):
         env_path = os.path.join(current_dir, ".env.local")
         if os.path.exists(env_path):
             load_dotenv(env_path)
@@ -37,11 +37,11 @@ find_and_load_env()
 SERVER_IP = "10.8.1.93"
 IPERF_PORT = 5202
 IPERF_DURATION = 10
-UDP_BANDWIDTH = "20M"
+# UDP_BANDWIDTH = "20M"   # ปิด UDP เหมือน Windows version
 PING_COUNT = 4
 MAX_HOPS = 15
 TRACERT_TIMEOUT = 500
-APP_TITLE = "Wi-Fi Survey Excel Pro v6"
+APP_TITLE = "Wi-Fi Survey Excel Pro v6 (Linux)"
 DEFAULT_SHEET_NAME = "Raw_Data"
 
 # Spectrum / image config
@@ -65,12 +65,11 @@ class WifiSurveyApp(ctk.CTk):
         super().__init__()
 
         self.title(APP_TITLE)
-        self.geometry("1300x900")
+        self.geometry("1600x900")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self._test_running = False
-        self.os_type = "Linux"
-        self.iperf_path = "iperf3"
+        self.iperf_path = "iperf3"  # Linux: ใช้ system iperf3
 
         # Spectrum-related cache
         self.wifi_cache = {}
@@ -87,16 +86,18 @@ class WifiSurveyApp(ctk.CTk):
         top_wrap.pack(fill="both", expand=True, padx=20, pady=15)
 
         left_panel = ctk.CTkFrame(top_wrap)
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        left_panel.pack(side="left", fill="both", padx=(0, 10))
+        left_panel.pack_propagate(False)
+        left_panel.configure(width=500)
 
         right_panel = ctk.CTkFrame(top_wrap)
         right_panel.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
         # LEFT SIDE
-        ctk.CTkLabel(left_panel, text="Wi-Fi Survey Pro", font=("Arial", 24, "bold")).pack(pady=(20, 2))
+        ctk.CTkLabel(left_panel, text="Wi-Fi Survey Pro (Linux)", font=("Arial", 24, "bold")).pack(pady=(20, 2))
         ctk.CTkLabel(
             left_panel,
-            text=f"iPerf: {IPERF_DURATION}s | UDP: {UDP_BANDWIDTH} | Port: {IPERF_PORT}",
+            text=f"iPerf Duration: {IPERF_DURATION}s | Port: {IPERF_PORT}",
             font=("Arial", 11),
             text_color="gray",
         ).pack(pady=(0, 10))
@@ -107,25 +108,25 @@ class WifiSurveyApp(ctk.CTk):
         ctk.CTkLabel(net_frame, text="Network Settings", font=("Arial", 13, "bold")).pack(pady=(10, 0))
 
         ip_inner = ctk.CTkFrame(net_frame, fg_color="transparent")
-        ip_inner.pack(pady=5, fill="x", padx=10)
+        ip_inner.pack(pady=5, fill="x", padx=5)
 
-        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(5, 2), pady=5, sticky="e")
-        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="iPerf Server:").grid(row=0, column=0, padx=(3, 2), pady=5, sticky="e")
+        self.entry_server_ip = ctk.CTkEntry(ip_inner, width=100)
         self.entry_server_ip.insert(0, SERVER_IP)
         self.entry_server_ip.grid(row=0, column=1, padx=2, pady=5)
 
-        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(15, 2), pady=5, sticky="e")
-        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=150)
+        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(0, 2), pady=5, sticky="e")
+        self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=100)
         self.entry_trace_ip.insert(0, SERVER_IP)
         self.entry_trace_ip.grid(row=0, column=3, padx=2, pady=5)
 
         ctk.CTkLabel(ip_inner, text="Diag Mode:").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="e")
         self.combo_diag_mode = ctk.CTkComboBox(
             ip_inner,
-            values=["Quick (IP, 5 Pings)", "Detailed (Host, 10 Pings)"],
+            values=["Quick Network Trace (IP, 5 Pings)", "Detailed Network Trace (Host, 10 Pings)"],
             width=150,
         )
-        self.combo_diag_mode.set("Quick (IP, 5 Pings)")
+        self.combo_diag_mode.set("Quick Network Trace (IP, 5 Pings)")
         self.combo_diag_mode.grid(row=1, column=1, padx=2, pady=5)
 
         input_frame = ctk.CTkFrame(left_panel)
@@ -199,7 +200,7 @@ class WifiSurveyApp(ctk.CTk):
         self.spectrum_frame = ctk.CTkFrame(right_panel)
         self.spectrum_frame.pack(padx=15, pady=10, fill="both", expand=True)
 
-        self.fig, self.ax = plt.subplots(figsize=(7, 6), dpi=100)
+        self.fig, self.ax = plt.subplots(figsize=(11, 8), dpi=100)
         self.fig.patch.set_facecolor("#0d1117")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.spectrum_frame)
@@ -264,8 +265,7 @@ class WifiSurveyApp(ctk.CTk):
     # COMMAND HELPERS
     # =========================
     def _creation_flags(self):
-        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
-            return subprocess.CREATE_NO_WINDOW
+        # Linux ไม่ต้องการ creationflags
         return 0
 
     def run_command(self, args, timeout=20):
@@ -276,84 +276,64 @@ class WifiSurveyApp(ctk.CTk):
             encoding="utf-8",
             errors="ignore",
             timeout=timeout,
-            creationflags=self._creation_flags(),
         )
-
-    def powershell_escape(self, value):
-        return str(value).replace("'", "''")
-
-    def run_powershell_json(self, script, timeout=20):
-        result = self.run_command(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-            timeout=timeout,
-        )
-
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-
-        if result.returncode != 0 and not stdout:
-            raise RuntimeError(stderr or "PowerShell command failed.")
-        if not stdout:
-            return None
-
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Failed to parse PowerShell JSON output: {stdout[:200]}") from exc
 
     # =========================
-    # WLAN INFO
+    # WLAN INFO (Linux)
     # =========================
     def get_wlan_info(self):
         info = {
-            "SSID": "Unknown", "BSSID": "Unknown", "Band": "Unknown", "Channel": "Unknown",
-            "Radio_Type": "Unknown", "Receive_Rate_Mbps": None, "Transmit_Rate_Mbps": None,
-            "Signal_%": None, "RSSI_dBm": None,
+            "SSID": "Unknown",
+            "BSSID": "Unknown",
+            "Band": "Unknown",
+            "Channel": "Unknown",
+            "Radio_Type": "Unknown",
+            "Receive_Rate_Mbps": None,
+            "Transmit_Rate_Mbps": None,
+            "Signal_%": None,
+            "RSSI_dBm": None,
         }
+
         try:
-            # ใช้พารามิเตอร์ -t (terse) เพื่อให้ดึงข้อมูลออกมาเป็นบรรทัดเดียวคั่นด้วย :
-            res = self.run_command(["nmcli", "-t", "-f", "ACTIVE,SSID,BSSID,CHAN,RATE,SIGNAL", "device", "wifi"])
-            
+            # ดึงข้อมูล Wi-Fi ที่เชื่อมต่ออยู่ด้วย nmcli
+            res = self.run_command(
+                ["nmcli", "-t", "-f", "ACTIVE,SSID,BSSID,CHAN,RATE,SIGNAL", "device", "wifi"],
+                timeout=8,
+            )
             for line in res.stdout.splitlines():
                 if line.startswith("yes"):
-                    # แก้ปัญหา BSSID มีเครื่องหมาย : โดยการหลบค่า \: ไปก่อน
-                    p = line.replace('\\:', '++').split(':')
-                    
+                    # BSSID มี ':' ใน nmcli -t จะถูก escape เป็น '\:'
+                    p = line.replace("\\:", "++").split(":")
                     if len(p) >= 6:
                         info["SSID"] = p[1] if p[1] else "Hidden"
-                        # ดึงค่ากลับมาเป็นรูปแบบ MAC address ปกติ
-                        info["BSSID"] = p[2].replace('++', ':')
+                        info["BSSID"] = p[2].replace("++", ":").lower()
                         info["Channel"] = p[3]
-                        
-                        # ดึงเฉพาะตัวเลขความเร็ว
-                        rate_match = re.search(r'\d+', p[4])
-                        info["Receive_Rate_Mbps"] = float(rate_match.group()) if rate_match else None
-                        info["Transmit_Rate_Mbps"] = info["Receive_Rate_Mbps"]
-                        
-                        info["Signal_%"] = int(p[5])
-                        # แยก Band จาก Channel
+                        rate_match = re.search(r"\d+", p[4])
+                        if rate_match:
+                            info["Receive_Rate_Mbps"] = float(rate_match.group())
+                            info["Transmit_Rate_Mbps"] = info["Receive_Rate_Mbps"]
+                        try:
+                            sig_val = int(p[5].strip())
+                            info["Signal_%"] = sig_val
+                        except Exception:
+                            pass
                         try:
                             info["Band"] = "5 GHz" if int(p[3]) > 14 else "2.4 GHz"
-                        except:
-                            info["Band"] = "Unknown"
+                        except Exception:
+                            pass
+                    break
 
-            # คำนวณ RSSI จากเปอร์เซ็นต์สัญญาณ (สูตรมาตรฐาน Linux)
+            # คำนวณ RSSI จาก Signal %
             if info["RSSI_dBm"] is None and info["Signal_%"] is not None:
                 info["RSSI_dBm"] = round((info["Signal_%"] / 2) - 100, 1)
-                
-        except Exception as e: 
+
+        except Exception as e:
             print(f"Error in get_wlan_info: {e}")
-            
+
         return info
+
     def normalize_key(self, value):
         return re.sub(r"[^a-z0-9()%]", "", str(value).strip().lower())
-
-    def find_interface_value(self, pairs, aliases):
-        alias_set = set(aliases)
-        for key, value in pairs:
-            if key in alias_set and value:
-                return value
-        return None
 
     def find_mac_address(self, text):
         matches = re.findall(r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", text)
@@ -375,6 +355,119 @@ class WifiSurveyApp(ctk.CTk):
             return None
         return float(match.group(0))
 
+    # =========================
+    # NOISE / SNR MEASUREMENT (Linux)
+    # =========================
+    def measure_noise_snr(self, rssi_dbm):
+        """
+        วัด Noise Floor และ SNR บน Linux โดยใช้ iw dev <iface> survey dump เท่านั้น
+        ซึ่งเป็นค่าที่วัดได้จริงจาก hardware radio survey
+
+        หมายเหตุ: ต้องการสิทธิ์ CAP_NET_ADMIN (หรือ sudo) และไดรเวอร์ต้องรองรับ
+        ถ้าวัดไม่ได้ → คืน None ทั้งหมด ไม่ประมาณหรือคำนวณจากค่าอื่น
+        """
+        noise_floor = None
+        snr_db = None
+        snr_quality = None
+
+        # หา wireless interface ที่ใช้งานอยู่
+        iface = self._get_active_wifi_iface()
+        if not iface:
+            return None, None, None
+
+        # ─── iw dev survey dump ────────────────────────────────────────────────
+        try:
+            result = self.run_command(["iw", "dev", iface, "survey", "dump"], timeout=10)
+            if result.returncode == 0 and result.stdout:
+                in_use_block = False
+                for raw_line in result.stdout.splitlines():
+                    line = raw_line.strip().lower()
+                    if "in use" in line:
+                        in_use_block = True
+                    if in_use_block and "noise" in line and ":" in line:
+                        _, val = line.split(":", 1)
+                        val = val.strip().replace("dbm", "").strip()
+                        parsed = self.parse_float(val)
+                        if parsed is not None and parsed < 0:
+                            noise_floor = round(parsed, 1)
+                        break  # พบ noise line แล้ว หยุดได้เลยไม่ว่าจะได้ค่าหรือไม่
+        except Exception:
+            pass
+
+        # ─── คำนวณ SNR (เฉพาะเมื่อวัด noise ได้จริงจาก iw survey เท่านั้น) ──
+        if rssi_dbm is not None and noise_floor is not None:
+            snr_db = round(rssi_dbm - noise_floor, 1)
+            if snr_db >= 40:
+                snr_quality = "Excellent"
+            elif snr_db >= 25:
+                snr_quality = "Good"
+            elif snr_db >= 15:
+                snr_quality = "Fair"
+            else:
+                snr_quality = "Poor"
+
+        return noise_floor, snr_db, snr_quality
+
+    def _get_active_wifi_iface(self):
+        """หา wireless interface ที่กำลังเชื่อมต่ออยู่"""
+        try:
+            # วิธี 1: nmcli
+            result = self.run_command(
+                ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"],
+                timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split(":")
+                if len(parts) >= 3 and "wifi" in parts[1].lower() and "connected" in parts[2].lower():
+                    return parts[0]
+        except Exception:
+            pass
+
+        try:
+            # วิธี 2: iw dev
+            result = self.run_command(["iw", "dev"], timeout=5)
+            ifaces = re.findall(r"Interface\s+(\S+)", result.stdout)
+            if ifaces:
+                return ifaces[0]
+        except Exception:
+            pass
+
+        try:
+            # วิธี 3: หาจาก /sys/class/net
+            for iface in os.listdir("/sys/class/net"):
+                wireless_path = f"/sys/class/net/{iface}/wireless"
+                if os.path.isdir(wireless_path):
+                    return iface
+        except Exception:
+            pass
+
+        return None
+
+    def normalize_band(self, band):
+        """Normalize band string to standard format: '2.4 GHz' or '5 GHz'."""
+        if not band:
+            return "Unknown"
+        b = str(band).strip().lower().replace(" ", "")
+        if "2.4" in b:
+            return "2.4 GHz"
+        if "5" in b:
+            return "5 GHz"
+        return "Unknown"
+
+    def lookup_ap_vendor(self, bssid):
+        """Look up AP vendor/brand from BSSID using macvendors API."""
+        if not bssid or bssid in ("Unknown", "unknown"):
+            return "Unknown"
+        try:
+            oui = bssid.replace("-", ":").upper()[:8]
+            import urllib.request
+            url = f"https://api.macvendors.com/{oui}"
+            req = urllib.request.Request(url, headers={"User-Agent": "WifiSurveyApp/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.read().decode("utf-8").strip()
+        except Exception:
+            return "Unknown"
+
     def infer_band_from_channel(self, channel):
         try:
             ch = int(str(channel).strip())
@@ -387,47 +480,93 @@ class WifiSurveyApp(ctk.CTk):
             return "Unknown"
 
     # =========================
-    # ROUTING / PING
+    # ROUTING / PING (Linux)
     # =========================
     def get_default_gateway(self):
         try:
-                result = self.run_command(["ip", "route", "show", "default"], timeout=5)
-                match = re.search(r"default via ([\d.]+)", result.stdout)
-                return match.group(1) if match else "Unknown"
-        except Exception: return "Unknown"
+            result = self.run_command(["ip", "route", "show", "default"], timeout=5)
+            match = re.search(r"default via ([\d.]+)", result.stdout)
+            return match.group(1) if match else "Unknown"
+        except Exception:
+            return "Unknown"
 
     def ping_host(self, host, count=4):
         stats = self.ping_for_stats(host, count=count)
         return stats["Avg"], stats["Loss_%"]
 
     def ping_for_stats(self, host, count=10):
-        if not host or host in ("Unknown", "Timeout"):
+        if not host or host in ("Unknown", "Timeout", "Unreachable"):
             return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
         try:
-                res = self.run_command(["ping", "-c", str(count), host])
-                stats = re.search(r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)", res.stdout)
-                loss = re.search(r"(\d+)% packet loss", res.stdout)
-                if stats: return {"Min": float(stats.group(1)), "Avg": float(stats.group(2)), "Max": float(stats.group(3)), "Loss_%": int(loss.group(1))}
-        except Exception: pass
+            res = self.run_command(["ping", "-c", str(count), host], timeout=max(15, count * 2))
+            stats = re.search(r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)", res.stdout)
+            loss = re.search(r"(\d+)% packet loss", res.stdout)
+            if stats:
+                return {
+                    "Min": float(stats.group(1)),
+                    "Avg": float(stats.group(2)),
+                    "Max": float(stats.group(3)),
+                    "Loss_%": int(loss.group(1)) if loss else 100,
+                }
+        except Exception:
+            pass
         return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
 
     # =========================
-    # TRACEROUTE
+    # TRACEROUTE (Linux)
     # =========================
     def run_traceroute(self, host, max_hops=10, timeout_ms=500, resolve_hostname=False):
         hops = []
         try:
-                # Linux traceroute (requires 'traceroute' package)
-                cmd = ["traceroute", "-m", str(max_hops), "-w", "1"]
-                if not resolve_hostname: cmd.append("-n")
-                cmd.append(host)
+            cmd = ["traceroute", "-m", str(max_hops), "-w", "1"]
+            if not resolve_hostname:
+                cmd.append("-n")
+            cmd.append(host)
 
-                result = self.run_command(cmd, timeout=30)
-                for line in result.stdout.splitlines():
-                    hop_match = re.search(r"^\s*(\d+)\s+.*([\d.]{7,15}|Timeout|\*)", line)
-                    if hop_match:
-                        hops.append({"Hop": hop_match.group(1), "IP": hop_match.group(2)})
-        except Exception: pass
+            result = self.run_command(cmd, timeout=max(30, max_hops * 4))
+
+            for line in result.stdout.splitlines():
+                hop_match = re.match(r"^\s*(\d+)\s+(.*)", line)
+                if not hop_match:
+                    continue
+
+                hop_num = hop_match.group(1)
+                rest = hop_match.group(2)
+
+                ip = "Unknown"
+                hostname = ""
+
+                # หา IP/hostname
+                ip_match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", rest)
+                host_bracket = re.search(r"([^\s(]+)\s+\((\d{1,3}(?:\.\d{1,3}){3})\)", rest)
+                if host_bracket:
+                    hostname = host_bracket.group(1)
+                    ip = host_bracket.group(2)
+                elif ip_match:
+                    ip = ip_match.group(1)
+                elif rest.count("*") >= 3:
+                    ip = "Timeout"
+
+                # หา RTT times
+                times = re.findall(r"([\d.]+)\s*ms|\*", rest)
+                t1 = times[0] if len(times) > 0 else "*"
+                t2 = times[1] if len(times) > 1 else "*"
+                t3 = times[2] if len(times) > 2 else "*"
+
+                def fmt_t(t):
+                    return f"{t}ms" if t != "*" else "*"
+
+                hops.append({
+                    "Hop": hop_num,
+                    "RTT1": fmt_t(t1),
+                    "RTT2": fmt_t(t2),
+                    "RTT3": fmt_t(t3),
+                    "IP": ip,
+                    "Hostname": hostname,
+                })
+
+        except Exception:
+            pass
         return hops
 
     def run_pingplotter_style(self, host, max_hops=10, timeout_ms=500, ping_count=10, resolve_hostname=False):
@@ -461,7 +600,6 @@ class WifiSurveyApp(ctk.CTk):
                     stats = future.result()
                 except Exception:
                     stats = {"Min": None, "Max": None, "Avg": None, "Loss_%": None}
-
                 hop["Min"] = stats["Min"]
                 hop["Max"] = stats["Max"]
                 hop["Avg"] = stats["Avg"]
@@ -470,53 +608,55 @@ class WifiSurveyApp(ctk.CTk):
         return hops
 
     # =========================
-    # SPECTRUM / WIFI SCAN
+    # SPECTRUM / WIFI SCAN (Linux)
     # =========================
     def scan_wifi_live(self):
         now = time.time()
         try:
-            # สั่ง rescan (ต้องใช้ sudo หรือสิทธิ์ user ที่เหมาะสม)
-            subprocess.run(["nmcli", "device", "wifi", "rescan"], stderr=subprocess.DEVNULL)
-            
-            # ใช้ --terse และ --fields โดยระบุตัวคั่นเป็นอย่างอื่น (เช่น '|') จะปลอดภัยกว่า
-            # หรือถ้าจะใช้แบบเดิม ต้องแก้วิธี split
+            subprocess.run(["nmcli", "device", "wifi", "rescan"], stderr=subprocess.DEVNULL, timeout=5)
+            time.sleep(1.0)
+
             result = subprocess.run(
                 ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SIGNAL,FREQ", "device", "wifi"],
-                capture_output=True, text=True, encoding='utf-8'
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
             )
             out = result.stdout
 
-            for line in out.strip().split('\n'):
-                if not line: continue
+            for line in out.strip().split("\n"):
+                if not line:
+                    continue
                 try:
-                    # แก้ปัญหา BSSID มีเครื่องหมาย : โดยการหาจุดที่โดน escape (\:)
-                    # nmcli แบบ -t จะส่งมาเป็น SSID:BSSID:CHAN:SIGNAL:FREQ
-                    # แต่ BSSID จะเป็น AA\:BB\:CC...
-                    parts = line.replace('\\:', '++').split(':')
-                    if len(parts) < 5: continue
-                    
+                    parts = line.replace("\\:", "++").split(":")
+                    if len(parts) < 5:
+                        continue
                     ssid = parts[0]
-                    mac = parts[1].replace('++', ':').lower()
+                    mac = parts[1].replace("++", ":").lower()
                     channel = int(parts[2])
                     signal = int(parts[3])
-                    freq_val = int(re.search(r'\d+', parts[4]).group()) # ดึงเฉพาะตัวเลข
-                    
-                    # คำนวณ RSSI: nmcli ให้ signal เป็น % (0-100)
-                    # สูตรแปลง % เป็น dBm ประมาณ: (signal / 2) - 100
+                    freq_str = parts[4]
+                    freq_match = re.search(r"\d+", freq_str)
+                    freq_val = int(freq_match.group()) if freq_match else 2400
+
                     rssi_dbm = (signal / 2) - 100
-                    
+
                     self.wifi_cache[mac] = {
-                        "ssid": ssid or "Hidden",
+                        "ssid": ssid if ssid else "Hidden",
                         "ch": channel,
                         "rssi": rssi_dbm,
                         "band": 5.0 if freq_val > 3000 else 2.4,
-                        "updated": now
+                        "updated": now,
                     }
-                except Exception as e:
-                    print(f"Parsing error: {e}") # สำหรับ debug
+                except Exception:
                     continue
+
+            for key in list(self.wifi_cache.keys()):
+                if now - self.wifi_cache[key]["updated"] > SPECTRUM_CACHE_TIMEOUT:
+                    del self.wifi_cache[key]
+
         except Exception as e:
             print(f"Scan error: {e}")
+
+        return self.wifi_cache
 
     def analyze_channel_quality(self, connected_channel):
         same_channel = 0
@@ -587,7 +727,7 @@ class WifiSurveyApp(ctk.CTk):
             ax.text(
                 ch,
                 rssi + 1 + offset,
-                f"{label_ssid}\n{rssi}dBm",
+                f"{label_ssid}\n{rssi:.0f}dBm",
                 color=color,
                 fontsize=8,
                 ha="center",
@@ -602,20 +742,15 @@ class WifiSurveyApp(ctk.CTk):
 
         if not active_wifi:
             ax.text(
-                0.5,
-                0.5,
+                0.5, 0.5,
                 "No nearby Wi-Fi data yet",
                 transform=ax.transAxes,
-                color="gray",
-                fontsize=12,
-                ha="center",
-                va="center",
+                color="gray", fontsize=12, ha="center", va="center",
             )
 
     def draw_spectrum_on_canvas(self):
         if not hasattr(self, "ax") or not hasattr(self, "canvas"):
             return
-
         self._render_spectrum(self.ax)
         self.canvas.draw_idle()
 
@@ -623,7 +758,6 @@ class WifiSurveyApp(ctk.CTk):
         fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
         fig.patch.set_facecolor("#0d1117")
         self._render_spectrum(ax)
-
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         fig.savefig(save_path, facecolor="#0d1117", bbox_inches="tight", dpi=120)
         plt.close(fig)
@@ -632,27 +766,20 @@ class WifiSurveyApp(ctk.CTk):
         if self._test_running:
             self.after(3000, self.update_spectrum_preview)
             return
-
         try:
             self.scan_wifi_live()
             self.draw_spectrum_on_canvas()
         except Exception:
             pass
-
         self.after(SPECTRUM_REFRESH_MS, self.update_spectrum_preview)
 
     # =========================
-    # IPERF
+    # IPERF (Linux)
     # =========================
     def run_iperf(self, server_ip, args, label):
         self.set_status(f"Running {label}...", "yellow")
 
-        # --- แก้ไขจุดที่ 1: ตัดการเช็ค os.path.exists ออก ---
-        # บน Linux เราเรียก 'iperf3' ตรงๆ ระบบจะหาจาก /usr/bin/ เอง 
-        # การใช้ os.path.exists จะทำให้มันหาไม่เจอถ้าเราไม่ได้วางไฟล์ไว้ในโฟลเดอร์โปรแกรม
-        
         try:
-            # ใช้ self.iperf_path ซึ่งควรมีค่าเป็น "iperf3" สำหรับ Linux
             proc = self.run_command(
                 [self.iperf_path, "-c", server_ip, "-p", str(IPERF_PORT), "-4"] + args + ["--json"],
                 timeout=max(40, IPERF_DURATION + 20),
@@ -661,7 +788,6 @@ class WifiSurveyApp(ctk.CTk):
             stdout = proc.stdout.strip()
             stderr = proc.stderr.strip()
 
-            # --- แก้ไขจุดที่ 2: ปรับ Error Message ไม่ให้ระบุว่าเป็น .exe ---
             if proc.returncode != 0 and not stdout:
                 raise RuntimeError(
                     f"iPerf3 ({label}) failed.\n"
@@ -678,7 +804,6 @@ class WifiSurveyApp(ctk.CTk):
                 preview = stdout[:500]
                 raise RuntimeError(
                     f"iPerf3 ({label}) returned invalid JSON.\n"
-                    f"Command: {self.iperf_path} -c {server_ip} -p {IPERF_PORT} -4 {' '.join(args)} --json\n"
                     f"stdout preview: {preview}"
                 ) from exc
 
@@ -686,9 +811,11 @@ class WifiSurveyApp(ctk.CTk):
                 raise RuntimeError(f"iPerf3 ({label}): {data['error']}")
 
             return data
+
         except FileNotFoundError:
-            # กรณีที่ในเครื่องไม่ได้ติดตั้ง iperf3 ไว้เลย
-            raise RuntimeError(f"ไม่พบคำสั่ง '{self.iperf_path}' ในระบบ กรุณาติดตั้งด้วย 'sudo apt install iperf3'")
+            raise RuntimeError(
+                f"ไม่พบคำสั่ง '{self.iperf_path}' กรุณาติดตั้งด้วย: sudo apt install iperf3"
+            )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"iPerf3 ({label}) timed out.") from exc
 
@@ -704,27 +831,8 @@ class WifiSurveyApp(ctk.CTk):
         except Exception:
             return None
 
-    def parse_iperf_udp(self, data):
-        udp_mbps = None
-        jitter = None
-        loss = None
-
-        try:
-            udp_mbps = round(data["end"]["sum"]["bits_per_second"] / 1e6, 2)
-        except Exception:
-            pass
-
-        try:
-            jitter = round(data["end"]["sum"]["jitter_ms"], 2)
-        except Exception:
-            pass
-
-        try:
-            loss = round(data["end"]["sum"]["lost_percent"], 2)
-        except Exception:
-            pass
-
-        return udp_mbps, jitter, loss
+    # UDP ปิดใช้งาน เหมือน Windows version
+    # def parse_iperf_udp(self, data): ...
 
     # =========================
     # RATING
@@ -732,28 +840,19 @@ class WifiSurveyApp(ctk.CTk):
     def rate_result(self, signal_dbm, upload, download, loss, ping_server):
         try:
             if (
-                signal_dbm is not None
-                and signal_dbm >= -67
-                and upload is not None
-                and upload >= 50
-                and download is not None
-                and download >= 50
-                and loss is not None
-                and loss < 1
-                and ping_server is not None
-                and ping_server <= 20
+                signal_dbm is not None and signal_dbm >= -67
+                and upload is not None and upload >= 50
+                and download is not None and download >= 50
+                # and loss is not None and loss < 1
+                and ping_server is not None and ping_server <= 20
             ):
                 return "Good"
 
             if (
-                signal_dbm is not None
-                and signal_dbm >= -75
-                and upload is not None
-                and upload >= 20
-                and download is not None
-                and download >= 20
-                and loss is not None
-                and loss < 5
+                signal_dbm is not None and signal_dbm >= -75
+                and upload is not None and upload >= 20
+                and download is not None and download >= 20
+                and loss is not None and loss < 5
             ):
                 return "Fair"
 
@@ -767,7 +866,6 @@ class WifiSurveyApp(ctk.CTk):
     def resolve_output_file(self, preferred_file):
         if not os.path.exists(preferred_file):
             return preferred_file
-
         try:
             with open(preferred_file, "a+b"):
                 return preferred_file
@@ -777,6 +875,7 @@ class WifiSurveyApp(ctk.CTk):
             return f"{base}_autosave_{timestamp}{ext}"
 
     def save_to_excel(self, file_name, sheet_name, df):
+        os.makedirs(os.path.dirname(file_name), exist_ok=True)
         try:
             if not os.path.exists(file_name):
                 with pd.ExcelWriter(file_name, engine="openpyxl") as writer:
@@ -785,6 +884,8 @@ class WifiSurveyApp(ctk.CTk):
 
             try:
                 existing_df = pd.read_excel(file_name, sheet_name=sheet_name)
+                # ลบ column ที่ไม่มีใน df ปัจจุบัน
+                existing_df = existing_df[[c for c in existing_df.columns if c in df.columns]]
                 updated_df = pd.concat([existing_df, df], ignore_index=True)
             except ValueError:
                 updated_df = df
@@ -796,17 +897,21 @@ class WifiSurveyApp(ctk.CTk):
                 if_sheet_exists="replace",
             ) as writer:
                 updated_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
         except PermissionError as exc:
             raise PermissionError(
-                f"Cannot write to '{file_name}'. Please close the Excel file and try again."
+                f"Cannot write to '{file_name}'. Please close the file and try again."
             ) from exc
 
     # =========================
     # DATABASE
     # =========================
     def sanitize_db_value(self, value):
-        if pd.isna(value):
-            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
         return value
 
     def save_to_supabase(self, df_survey, df_trace):
@@ -830,7 +935,7 @@ class WifiSurveyApp(ctk.CTk):
                     "note": self.sanitize_db_value(row.get("Note")),
                     "ssid": self.sanitize_db_value(row.get("SSID")),
                     "bssid": self.sanitize_db_value(row.get("BSSID")),
-                    "band": self.sanitize_db_value(row.get("Band")),
+                    "band": self.normalize_band(self.sanitize_db_value(row.get("Band"))),
                     "radio_type": self.sanitize_db_value(row.get("Radio_Type")),
                     "channel": str(channel_value) if channel_value is not None else None,
                     "signal_percent": self.sanitize_db_value(row.get("Signal_%")),
@@ -846,12 +951,34 @@ class WifiSurveyApp(ctk.CTk):
                     "ping_server_loss_pct": self.sanitize_db_value(row.get("Ping_Server_Loss_%")),
                     "tcp_upload_mbps": self.sanitize_db_value(row.get("TCP_Upload_Mbps")),
                     "tcp_download_mbps": self.sanitize_db_value(row.get("TCP_Download_Mbps")),
-                    "udp_target_bandwidth": self.sanitize_db_value(row.get("UDP_Target_Bandwidth")),
-                    "udp_actual_mbps": self.sanitize_db_value(row.get("UDP_Actual_Mbps")),
-                    "udp_jitter_ms": self.sanitize_db_value(row.get("UDP_Jitter_ms")),
-                    "udp_packetloss_pct": self.sanitize_db_value(row.get("UDP_PacketLoss_%")),
+                    # UDP ปิดใช้งาน
+                    # "udp_target_bandwidth": ...,
+                    # "udp_actual_mbps": ...,
+                    # "udp_jitter_ms": ...,
+                    # "udp_packetloss_pct": ...,
+                    "noise_floor_dbm": self.sanitize_db_value(row.get("Noise_Floor_dBm")),
+                    "snr_db": self.sanitize_db_value(row.get("SNR_dB")),
+                    "snr_quality": self.sanitize_db_value(row.get("SNR_Quality")),
                     "rating": self.sanitize_db_value(row.get("Rating")),
+                    "ap_vendor": self.sanitize_db_value(row.get("AP_Vendor")),
                 }
+
+                # ตรวจสอบก่อนว่ามีข้อมูลซ้ำไหม
+                existing = (
+                    supabase.table("surveys")
+                    .select("id")
+                    .eq("building", survey_data["building"] or "")
+                    .eq("floor", survey_data["floor"] or "")
+                    .eq("room_point", survey_data["room_point"] or "")
+                    .eq("note", survey_data["note"] or "")
+                    .eq("band", survey_data["band"] or "")
+                    .eq("ssid", survey_data["ssid"] or "")
+                    .execute()
+                )
+
+                if existing.data:
+                    self.set_status("⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ", "yellow")
+                    return True, "⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ"
 
                 response = supabase.table("surveys").insert(survey_data).execute()
 
@@ -867,21 +994,19 @@ class WifiSurveyApp(ctk.CTk):
                         trace_room = self.sanitize_db_value(t_row.get("Room_Point"))
                         hop_value = self.sanitize_db_value(t_row.get("Hop"))
 
-                        trace_rows.append(
-                            {
-                                "survey_id": survey_id,
-                                "survey_timestamp": self.sanitize_db_value(t_row.get("Timestamp")),
-                                "building": self.sanitize_db_value(t_row.get("Building")),
-                                "floor": str(trace_floor) if trace_floor is not None else None,
-                                "room_point": str(trace_room) if trace_room is not None else None,
-                                "hop": int(hop_value) if hop_value is not None else None,
-                                "ip": self.sanitize_db_value(t_row.get("IP")),
-                                "loss_pct": self.sanitize_db_value(t_row.get("Loss_%")),
-                                "min_ms": self.sanitize_db_value(t_row.get("Min_ms")),
-                                "max_ms": self.sanitize_db_value(t_row.get("Max_ms")),
-                                "avg_ms": self.sanitize_db_value(t_row.get("Avg_ms")),
-                            }
-                        )
+                        trace_rows.append({
+                            "survey_id": survey_id,
+                            "survey_timestamp": self.sanitize_db_value(t_row.get("Timestamp")),
+                            "building": self.sanitize_db_value(t_row.get("Building")),
+                            "floor": str(trace_floor) if trace_floor is not None else None,
+                            "room_point": str(trace_room) if trace_room is not None else None,
+                            "hop": int(hop_value) if hop_value is not None else None,
+                            "ip": self.sanitize_db_value(t_row.get("IP")),
+                            "loss_pct": self.sanitize_db_value(t_row.get("Loss_%")),
+                            "min_ms": self.sanitize_db_value(t_row.get("Min_ms")),
+                            "max_ms": self.sanitize_db_value(t_row.get("Max_ms")),
+                            "avg_ms": self.sanitize_db_value(t_row.get("Avg_ms")),
+                        })
 
                     if trace_rows:
                         trace_response = supabase.table("traceroute_hops").insert(trace_rows).execute()
@@ -889,6 +1014,7 @@ class WifiSurveyApp(ctk.CTk):
                             return False, f"❌ Failed to insert trace data: {trace_response}"
 
             return True, "✅ Saved to Supabase successfully!"
+
         except Exception as e:
             print("SUPABASE ERROR:", e)
             return False, f"❌ Supabase Error: {str(e)}"
@@ -943,6 +1069,9 @@ class WifiSurveyApp(ctk.CTk):
         self.set_status("Collecting Wi-Fi interface details...", "cyan")
         wlan = self.get_wlan_info()
 
+        self.set_status("Measuring noise floor and SNR...", "cyan")
+        noise_floor_dbm, snr_db, snr_quality = self.measure_noise_snr(wlan["RSSI_dBm"])
+
         self.set_status("Resolving default gateway...", "cyan")
         gateway = self.get_default_gateway()
 
@@ -958,19 +1087,10 @@ class WifiSurveyApp(ctk.CTk):
         tcp_down_data = self.run_iperf(server_ip, ["-t", str(IPERF_DURATION), "-R"], "TCP Download")
         download_mbps = self.parse_iperf_tcp_download(tcp_down_data)
 
-        udp_mbps = None
-        jitter_ms = None
-        packet_loss_pct = None
-        udp_error = None
-        try:
-            udp_data = self.run_iperf(
-                server_ip,
-                ["-u", "-b", UDP_BANDWIDTH, "-t", str(IPERF_DURATION)],
-                "UDP Jitter/Loss",
-            )
-            udp_mbps, jitter_ms, packet_loss_pct = self.parse_iperf_udp(udp_data)
-        except Exception as exc:
-            udp_error = str(exc)
+        # UDP ปิดใช้งาน เหมือน Windows version
+        # udp_mbps = None
+        # jitter_ms = None
+        # packet_loss_pct = None
 
         if "Detailed" in diag_mode:
             resolve_hostname = True
@@ -1005,15 +1125,25 @@ class WifiSurveyApp(ctk.CTk):
                 "Strongest_Neighbor_RSSI": -100,
             }
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        preferred_file_name = f"{self.safe_filename(bldg)}.xlsx"
-        output_file_name = self.resolve_output_file(preferred_file_name)
+        self.set_status("Looking up AP vendor...", "cyan")
+        ap_vendor = self.lookup_ap_vendor(wlan["BSSID"])
 
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # ── เก็บ Excel ใน Survey_Data/<Building>/<Building>.xlsx ──────────────
         base_dir = os.path.join(SPECTRUM_IMAGE_ROOT, self.safe_filename(bldg))
         img_dir = os.path.join(base_dir, SPECTRUM_IMAGE_DIRNAME)
+        os.makedirs(base_dir, exist_ok=True)
         os.makedirs(img_dir, exist_ok=True)
 
-        image_name = f"{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        preferred_file_name = os.path.join(base_dir, f"{self.safe_filename(bldg)}.xlsx")
+        output_file_name = self.resolve_output_file(preferred_file_name)
+
+        # ── รูป Spectrum แยกไว้ใน Spectrum_Images/ ───────────────────────────
+        image_name = (
+            f"{self.safe_filename(bldg)}_{self.safe_filename(floor)}_"
+            f"{self.safe_filename(room)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        )
         image_path = os.path.join(img_dir, image_name)
 
         self.set_status("Saving spectrum image to local disk...", "cyan")
@@ -1023,7 +1153,7 @@ class WifiSurveyApp(ctk.CTk):
             wlan["RSSI_dBm"],
             upload_mbps,
             download_mbps,
-            packet_loss_pct,
+            None,  # UDP packet loss ปิดใช้งาน
             ping_srv_ms,
         )
 
@@ -1051,16 +1181,21 @@ class WifiSurveyApp(ctk.CTk):
             "Ping_Server_Loss_%": [ping_srv_loss],
             "TCP_Upload_Mbps": [upload_mbps],
             "TCP_Download_Mbps": [download_mbps],
-            "UDP_Target_Bandwidth": [UDP_BANDWIDTH],
-            "UDP_Actual_Mbps": [udp_mbps],
-            "UDP_Jitter_ms": [jitter_ms],
-            "UDP_PacketLoss_%": [packet_loss_pct],
+            # UDP ปิดใช้งาน
+            # "UDP_Target_Bandwidth": [UDP_BANDWIDTH],
+            # "UDP_Actual_Mbps": [udp_mbps],
+            # "UDP_Jitter_ms": [jitter_ms],
+            # "UDP_PacketLoss_%": [packet_loss_pct],
             "CoChannel_AP_Count": [channel_quality["CoChannel_AP_Count"]],
             "Adjacent_AP_Count": [channel_quality["Adjacent_AP_Count"]],
             "Strongest_Neighbor_RSSI": [channel_quality["Strongest_Neighbor_RSSI"]],
+            "Noise_Floor_dBm": [noise_floor_dbm],
+            "SNR_dB": [snr_db],
+            "SNR_Quality": [snr_quality],
             "Spectrum_Image": [image_name],
             "Spectrum_Image_Path": [image_path],
             "Rating": [rating],
+            "AP_Vendor": [ap_vendor],
         }
         df = pd.DataFrame(new_data)
 
@@ -1071,24 +1206,22 @@ class WifiSurveyApp(ctk.CTk):
         if tracert_hops:
             tracert_data = []
             for hop in tracert_hops:
-                tracert_data.append(
-                    {
-                        "Timestamp": timestamp,
-                        "Building": bldg,
-                        "Floor": floor,
-                        "Room_Point": room,
-                        "Hop": hop["Hop"],
-                        "Hostname": hop.get("Hostname", ""),
-                        "IP": hop["IP"],
-                        "Loss_%": hop.get("Loss_%"),
-                        "RTT1": hop.get("RTT1", "*"),
-                        "RTT2": hop.get("RTT2", "*"),
-                        "RTT3": hop.get("RTT3", "*"),
-                        "Min_ms": hop.get("Min"),
-                        "Max_ms": hop.get("Max"),
-                        "Avg_ms": hop.get("Avg"),
-                    }
-                )
+                tracert_data.append({
+                    "Timestamp": timestamp,
+                    "Building": bldg,
+                    "Floor": floor,
+                    "Room_Point": room,
+                    "Hop": hop["Hop"],
+                    "Hostname": hop.get("Hostname", ""),
+                    "IP": hop["IP"],
+                    "Loss_%": hop.get("Loss_%"),
+                    "RTT1": hop.get("RTT1", "*"),
+                    "RTT2": hop.get("RTT2", "*"),
+                    "RTT3": hop.get("RTT3", "*"),
+                    "Min_ms": hop.get("Min"),
+                    "Max_ms": hop.get("Max"),
+                    "Avg_ms": hop.get("Avg"),
+                })
             df_trace = pd.DataFrame(tracert_data)
             self.set_status("Saving TraceRoute to Excel...", "cyan")
             self.save_to_excel(output_file_name, "TraceRoute", df_trace)
@@ -1111,10 +1244,14 @@ class WifiSurveyApp(ctk.CTk):
             "ping_srv_loss": ping_srv_loss,
             "upload_mbps": upload_mbps,
             "download_mbps": download_mbps,
-            "udp_mbps": udp_mbps,
-            "jitter_ms": jitter_ms,
-            "packet_loss_pct": packet_loss_pct,
-            "udp_error": udp_error,
+            # "udp_mbps": udp_mbps,
+            # "jitter_ms": jitter_ms,
+            # "packet_loss_pct": packet_loss_pct,
+            # "udp_error": udp_error,
+            "noise_floor_dbm": noise_floor_dbm,
+            "snr_db": snr_db,
+            "snr_quality": snr_quality,
+            "ap_vendor": ap_vendor,
             "rating": rating,
             "tracert_hops": tracert_hops,
             "file_name": output_file_name,
@@ -1144,13 +1281,10 @@ class WifiSurveyApp(ctk.CTk):
             trace_str += f"{'-' * 74}\n"
 
         wlan = result["wlan"]
-        udp_error = result.get("udp_error")
-        udp_actual_display = result["udp_mbps"] if result["udp_mbps"] is not None else "N/A"
-        udp_jitter_display = result["jitter_ms"] if result["jitter_ms"] is not None else "N/A"
-        udp_loss_display = (
-            f"{result['packet_loss_pct']}%" if result["packet_loss_pct"] is not None else "N/A"
-        )
         cq = result.get("channel_quality", {})
+
+        noise_disp = f"{result.get('noise_floor_dbm')} dBm" if result.get("noise_floor_dbm") is not None else "N/A"
+        snr_disp = f"{result.get('snr_db')} dB ({result.get('snr_quality', 'N/A')})" if result.get("snr_db") is not None else "N/A"
 
         result_text = (
             f"{'=' * 58}\n"
@@ -1162,6 +1296,7 @@ class WifiSurveyApp(ctk.CTk):
             f"{'-' * 58}\n"
             f"  SSID            : {wlan['SSID']}\n"
             f"  BSSID           : {wlan['BSSID']}\n"
+            f"  AP Vendor       : {result.get('ap_vendor', 'Unknown')}\n"
             f"  Band            : {wlan['Band']}\n"
             f"  Radio Type      : {wlan['Radio_Type']}\n"
             f"  Channel         : {wlan['Channel']}\n"
@@ -1175,9 +1310,9 @@ class WifiSurveyApp(ctk.CTk):
             f"{'-' * 58}\n"
             f"  TCP Upload      : {result['upload_mbps']} Mbps\n"
             f"  TCP Download    : {result['download_mbps']} Mbps\n"
-            f"  UDP Actual      : {udp_actual_display}\n"
-            f"  UDP Jitter      : {udp_jitter_display}\n"
-            f"  UDP Loss        : {udp_loss_display}\n"
+            f"{'-' * 58}\n"
+            f"  Noise Floor     : {noise_disp}\n"
+            f"  SNR             : {snr_disp}\n"
             f"{'-' * 58}\n"
             f"  Co-Channel APs  : {cq.get('CoChannel_AP_Count', 0)}\n"
             f"  Adjacent APs    : {cq.get('Adjacent_AP_Count', 0)}\n"
@@ -1190,15 +1325,12 @@ class WifiSurveyApp(ctk.CTk):
             f"{'=' * 58}\n"
         )
 
-        if udp_error:
-            result_text += f"\nUDP Warning:\n{udp_error}\n"
-
         self.set_result_text(result_text)
         self.entry_room.delete(0, "end")
         self.entry_note.delete(0, "end")
 
         if result["file_name"].endswith(".xlsx") and "_autosave_" in result["file_name"]:
-            self.set_status("Test finished. Original workbook was busy, so data was saved to an autosave file.", "yellow")
+            self.set_status("Test finished. Saved to autosave file (original was busy).", "yellow")
         else:
             self.set_status("Test finished and data saved successfully.", "green")
 
@@ -1209,10 +1341,10 @@ class WifiSurveyApp(ctk.CTk):
             f"{error_text}\n\n"
             "Please check:\n"
             f"- Server {server_ip} is reachable\n"
-            "- iperf3.exe exists in the same folder as Wifi.py\n"
+            "- iperf3 is installed: sudo apt install iperf3\n"
             "- Wi-Fi is connected\n"
             "- Firewall is not blocking iPerf\n"
-            "- The output Excel file is not locked by another program\n"
+            "- traceroute is installed: sudo apt install traceroute\n"
         )
         self.set_result_text(message)
 

@@ -35,7 +35,7 @@ find_and_load_env()
 # CONFIG
 # =========================
 SERVER_IP = "10.8.1.93"
-IPERF_PORT = 5203
+IPERF_PORT = 5202
 IPERF_DURATION = 10
 UDP_BANDWIDTH = "10G"
 PING_COUNT = 4
@@ -898,19 +898,24 @@ class WifiSurveyApp(ctk.CTk):
         udp_mbps = None
         jitter = None
         loss = None
+    
+        udp_summary = data.get("end", {}).get("sum_received")
+
+        if not udp_summary:
+            udp_summary = data.get("end", {}).get("sum")
 
         try:
-            udp_mbps = round(data["end"]["sum"]["bits_per_second"] / 1e6, 2)
+            udp_mbps = round(udp_summary["bits_per_second"] / 1e6, 2)
         except Exception:
             pass
 
         try:
-            jitter = round(data["end"]["sum"]["jitter_ms"], 2)
+            jitter = round(udp_summary["jitter_ms"], 2)
         except Exception:
             pass
 
         try:
-            loss = round(data["end"]["sum"]["lost_percent"], 2)
+            loss = round(udp_summary["lost_percent"], 2)
         except Exception:
             pass
 

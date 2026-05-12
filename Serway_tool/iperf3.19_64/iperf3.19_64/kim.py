@@ -2,7 +2,9 @@ import concurrent.futures
 import json
 import os
 import re
+import socket
 import subprocess
+import ipaddress
 from tkinter import filedialog
 import threading
 import time
@@ -40,9 +42,7 @@ IPERF_PORT = 5202
 IPERF_DURATION = 10
 UDP_BANDWIDTH = "10G"
 PING_COUNT = 4
-MAX_HOPS = 15
-TRACERT_TIMEOUT = 500
-APP_TITLE = "Wi-Fi Survey Excel Pro v6"
+APP_TITLE = "Wi-Fi Survey Excel Pro v6 - WinMTR Import"
 DEFAULT_SHEET_NAME = "Raw_Data"
 
 # Spectrum / image config
@@ -117,19 +117,10 @@ class WifiSurveyApp(ctk.CTk):
         self.entry_server_ip.insert(0, SERVER_IP)
         self.entry_server_ip.grid(row=0, column=1, padx=2, pady=5)
 
-        ctk.CTkLabel(ip_inner, text="Traceroute Target:").grid(row=0, column=2, padx=(0, 2), pady=5, sticky="e")
+        ctk.CTkLabel(ip_inner, text="WinMTR Target:").grid(row=0, column=2, padx=(0, 2), pady=5, sticky="e")
         self.entry_trace_ip = ctk.CTkEntry(ip_inner, width=100)
         self.entry_trace_ip.insert(0, SERVER_IP)
         self.entry_trace_ip.grid(row=0, column=3, padx=2, pady=5)
-
-        ctk.CTkLabel(ip_inner, text="Diag Mode:").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="e")
-        self.combo_diag_mode = ctk.CTkComboBox(
-            ip_inner,
-            values=["Quick Network Trace (IP, 5 Pings)", "Detailed Network Trace (Host, 10 Pings)"],
-            width=150,
-        )
-        self.combo_diag_mode.set("Quick Network Trace (IP, 5 Pings)")
-        self.combo_diag_mode.grid(row=1, column=1, padx=2, pady=5)
 
         input_frame = ctk.CTkFrame(left_panel)
         input_frame.pack(padx=20, pady=5, fill="x")
@@ -177,6 +168,17 @@ class WifiSurveyApp(ctk.CTk):
         )
         self.btn_clear.pack(side="left", padx=10, pady=10, expand=True, fill="x")
 
+        self.btn_import_winmtr = ctk.CTkButton(
+            btn_frame,
+            text="IMPORT WINMTR",
+            command=self.import_winmtr_txt,
+            fg_color="#6b4fbb",
+            hover_color="#4c378a",
+            height=45,
+            font=("Arial", 14, "bold"),
+        )
+        self.btn_import_winmtr.pack(side="left", padx=10, pady=10, expand=True, fill="x")
+
         self.status_label = ctk.CTkLabel(left_panel, text="Ready", text_color="gray", font=("Arial", 12))
         self.status_label.pack(pady=2)
 
@@ -185,7 +187,7 @@ class WifiSurveyApp(ctk.CTk):
 
         ctk.CTkLabel(
             left_panel,
-            text="One building = one workbook. Raw data and traceroute are saved in separate sheets.",
+            text="One building = one workbook. Raw data and WinMTR imports are saved in separate sheets.",
             font=("Arial", 10),
             text_color="gray",
         ).pack(pady=(0, 12))
@@ -555,102 +557,6 @@ class WifiSurveyApp(ctk.CTk):
             return {"Min": None, "Max": None, "Avg": None, "Loss_%": 100}
 
     # =========================
-    # TRACEROUTE
-    # =========================
-    def run_traceroute(self, host, max_hops=10, timeout_ms=500, resolve_hostname=False):
-        hops = []
-
-        try:
-            cmd = ["tracert", "-h", str(max_hops), "-w", str(timeout_ms)]
-            if not resolve_hostname:
-                cmd.append("-d")
-            cmd.append(host)
-
-            result = self.run_command(cmd, timeout=max(20, max_hops * 6))
-
-            for raw_line in result.stdout.splitlines():
-                line = raw_line.strip()
-                hop_match = re.match(r"^(\d+)\s+(.*)$", line)
-                if not hop_match:
-                    continue
-
-                hop_num = hop_match.group(1)
-                rest = hop_match.group(2)
-
-                ip = "Unknown"
-                hostname = ""
-
-                ip_bracket = re.search(r"([^\s]+)\s+\[(\d{1,3}(?:\.\d{1,3}){3})\]", rest)
-                if ip_bracket:
-                    hostname = ip_bracket.group(1)
-                    ip = ip_bracket.group(2)
-                else:
-                    ip_match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", rest)
-                    if ip_match:
-                        ip = ip_match.group(1)
-                    elif rest.count("*") >= 3:
-                        ip = "Timeout"
-
-                times = re.findall(r"((?:<\s*1|\d+)\s*ms|\*)", rest, re.IGNORECASE)
-                t1 = times[0] if len(times) > 0 else "*"
-                t2 = times[1] if len(times) > 1 else "*"
-                t3 = times[2] if len(times) > 2 else "*"
-
-                hops.append(
-                    {
-                        "Hop": hop_num,
-                        "RTT1": t1.replace(" ", ""),
-                        "RTT2": t2.replace(" ", ""),
-                        "RTT3": t3.replace(" ", ""),
-                        "IP": ip,
-                        "Hostname": hostname,
-                    }
-                )
-        except Exception:
-            pass
-
-        return hops
-
-    def run_pingplotter_style(self, host, max_hops=10, timeout_ms=500, ping_count=10, resolve_hostname=False):
-        hops = self.run_traceroute(
-            host,
-            max_hops=max_hops,
-            timeout_ms=timeout_ms,
-            resolve_hostname=resolve_hostname,
-        )
-
-        if not hops:
-            return hops
-
-        worker_count = min(max(1, len(hops)), 6)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-            future_to_hop = {}
-            for hop in hops:
-                ip = hop["IP"]
-                if ip not in ("Unknown", "Timeout", "Unreachable"):
-                    future = executor.submit(self.ping_for_stats, ip, ping_count)
-                    future_to_hop[future] = hop
-                else:
-                    hop["Min"] = None
-                    hop["Max"] = None
-                    hop["Avg"] = None
-                    hop["Loss_%"] = None
-
-            for future in concurrent.futures.as_completed(future_to_hop):
-                hop = future_to_hop[future]
-                try:
-                    stats = future.result()
-                except Exception:
-                    stats = {"Min": None, "Max": None, "Avg": None, "Loss_%": None}
-
-                hop["Min"] = stats["Min"]
-                hop["Max"] = stats["Max"]
-                hop["Avg"] = stats["Avg"]
-                hop["Loss_%"] = stats["Loss_%"]
-
-        return hops
-
-    # =========================
     # SPECTRUM / WIFI SCAN
     # =========================
     def scan_wifi_live(self):
@@ -1000,6 +906,293 @@ class WifiSurveyApp(ctk.CTk):
             ) from exc
 
     # =========================
+    # WINMTR TXT IMPORT
+    # =========================
+    def read_text_file_safely(self, file_path):
+        """Read exported WinMTR TXT files with common Windows encodings."""
+        encodings = ("utf-8-sig", "utf-16", "cp874", "cp1252", "latin-1")
+
+        last_error = None
+        for encoding in encodings:
+            try:
+                with open(file_path, "r", encoding=encoding, errors="strict") as f:
+                    return f.read()
+            except UnicodeError as exc:
+                last_error = exc
+
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+
+        if not text and last_error:
+            raise RuntimeError(f"Unable to read text file: {last_error}")
+
+        return text
+
+    def is_ipv4_address(self, value):
+        try:
+            ipaddress.ip_address(str(value).strip())
+            return True
+        except Exception:
+            return False
+
+    def resolve_winmtr_host_to_ip(self, host):
+        """Return only an IP-like value for WinMTR rows.
+
+        WinMTR sometimes exports a real IP address and sometimes a hostname,
+        for example nperf.psu.ac.th. The database now keeps only the ip column,
+        so this function resolves hostnames to IPv4 when possible.
+        """
+        host_text = str(host or "").strip()
+        if not host_text:
+            return "Unknown"
+
+        # Handle forms such as: example.com [192.168.1.1]
+        bracket_ip = re.search(r"\[(\d{1,3}(?:\.\d{1,3}){3})\]", host_text)
+        if bracket_ip:
+            return bracket_ip.group(1)
+
+        # Handle plain IP address.
+        if self.is_ipv4_address(host_text):
+            return host_text
+
+        # Handle hostnames by DNS resolution.
+        try:
+            return socket.gethostbyname(host_text)
+        except Exception:
+            # Keep the value instead of dropping the hop. This should be rare,
+            # and the visible database schema still has only one column: ip.
+            return host_text
+
+    def parse_winmtr_txt(self, file_path):
+        """
+        Parse WinMTR exported .TXT file.
+
+        Expected WinMTR line format:
+        | host - loss | sent | recv | best | avrg | wrst | last |
+        """
+        rows = []
+        text = self.read_text_file_safely(file_path)
+        hop_no = 0
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+
+            if not line.startswith("|"):
+                continue
+            if " - " not in line:
+                continue
+
+            cleaned = line.strip("|").strip()
+
+            match = re.match(
+                r"(.+?)\s+-\s+(\d+)\s*\|\s*"
+                r"(\d+)\s*\|\s*"
+                r"(\d+)\s*\|\s*"
+                r"(\d+)\s*\|\s*"
+                r"(\d+)\s*\|\s*"
+                r"(\d+)\s*\|\s*"
+                r"(\d+)",
+                cleaned,
+            )
+
+            if not match:
+                continue
+
+            hop_no += 1
+            host = match.group(1).strip()
+            ip = self.resolve_winmtr_host_to_ip(host)
+
+            rows.append(
+                {
+                    "Hop": hop_no,
+                    "IP": ip,
+                    "Loss_%": int(match.group(2)),
+                    "Sent": int(match.group(3)),
+                    "Recv": int(match.group(4)),
+                    "Best_ms": int(match.group(5)),
+                    "Avg_ms": int(match.group(6)),
+                    "Worst_ms": int(match.group(7)),
+                    "Last_ms": int(match.group(8)),
+                }
+            )
+
+        return rows
+
+    def save_winmtr_to_supabase(self, df_winmtr):
+        """Upsert WinMTR hop data into public.traceroute_hops."""
+        try:
+            if not SUPABASE_URL or not SUPABASE_KEY:
+                return False, "❌ Supabase credentials not configured. Check .env.local file."
+
+            if df_winmtr is None or df_winmtr.empty:
+                return False, "❌ No WinMTR data to save."
+
+            supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+            first_row = df_winmtr.iloc[0]
+            survey_id = self.get_or_create_trace_survey_id(
+                supabase,
+                self.sanitize_db_value(first_row.get("Timestamp")),
+                self.sanitize_db_value(first_row.get("Building")),
+                self.sanitize_db_value(first_row.get("Floor")),
+                self.sanitize_db_value(first_row.get("Room_Point")),
+                self.sanitize_db_value(first_row.get("Note")),
+                self.sanitize_db_value(first_row.get("Trace_Target")),
+            )
+
+            rows = []
+
+            for _, row in df_winmtr.iterrows():
+                floor_value = self.sanitize_db_value(row.get("Floor"))
+                room_value = self.sanitize_db_value(row.get("Room_Point"))
+                ip_value = self.sanitize_db_value(row.get("IP"))
+                ip_text = str(ip_value).strip() if ip_value is not None else "Unknown"
+
+                rows.append(
+                    {
+                        "source": "winmtr",
+                        "survey_id": survey_id,
+                        "survey_timestamp": self.sanitize_db_value(row.get("Timestamp")),
+                        "building": self.sanitize_db_value(row.get("Building")),
+                        "floor": str(floor_value) if floor_value is not None else None,
+                        "room_point": str(room_value) if room_value is not None else None,
+                        "note": self.sanitize_db_value(row.get("Note")),
+                        "trace_target": self.sanitize_db_value(row.get("Trace_Target")),
+                        "hop_no": int(row.get("Hop")),
+                        "ip": ip_text,
+                        "loss_pct": self.sanitize_db_value(row.get("Loss_%")),
+                        "sent": self.sanitize_db_value(row.get("Sent")),
+                        "recv": self.sanitize_db_value(row.get("Recv")),
+                        "best_ms": self.sanitize_db_value(row.get("Best_ms")),
+                        "avg_ms": self.sanitize_db_value(row.get("Avg_ms")),
+                        "worst_ms": self.sanitize_db_value(row.get("Worst_ms")),
+                        "last_ms": self.sanitize_db_value(row.get("Last_ms")),
+                        "source_file": self.sanitize_db_value(row.get("Source_File")),
+                        "updated_at": datetime.now().isoformat(),
+                    }
+                )
+
+            response = (
+                supabase.table("traceroute_hops")
+                .upsert(
+                    rows,
+                    on_conflict="building,floor,room_point,trace_target,hop_no,ip",
+                )
+                .execute()
+            )
+
+            if getattr(response, "data", None) is None:
+                return False, f"❌ Failed to save WinMTR data into traceroute_hops: {response}"
+
+            return True, "✅ Saved to Supabase table: traceroute_hops"
+        except Exception as e:
+            print("WINMTR SUPABASE ERROR:", e)
+            return False, f"❌ Supabase Error: {str(e)}"
+
+    def import_winmtr_txt(self):
+        """Import a WinMTR TXT export, save it to Excel, then upsert it to Supabase."""
+        if self._test_running:
+            self.set_status("A test is running. Please wait until it finishes.", "yellow")
+            return
+
+        bldg = self.entry_bldg.get().strip()
+        floor = self.entry_floor.get().strip()
+        room = self.entry_room.get().strip()
+        note = self.entry_note.get().strip()
+        trace_target = self.entry_trace_ip.get().strip() or self.entry_server_ip.get().strip() or SERVER_IP
+
+        if not bldg or not floor or not room:
+            self.set_status("Please fill Building, Floor, and Room/Test Point before importing WinMTR.", "red")
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Select WinMTR TXT file",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+
+        if not file_path:
+            return
+
+        try:
+            self.set_status("Importing WinMTR TXT...", "cyan")
+            hops = self.parse_winmtr_txt(file_path)
+
+            if not hops:
+                self.set_status("No WinMTR hop data found in selected file.", "red")
+                self.set_result_text(
+                    "No WinMTR hop data found.\n\n"
+                    "Please export from WinMTR using Export TEXT and try again."
+                )
+                return
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            data = []
+
+            for hop in hops:
+                data.append(
+                    {
+                        "Timestamp": timestamp,
+                        "Building": bldg,
+                        "Floor": floor,
+                        "Room_Point": room,
+                        "Note": note,
+                        "Trace_Target": trace_target,
+                        "Hop": hop["Hop"],
+                        "IP": hop["IP"],
+                        "Loss_%": hop["Loss_%"],
+                        "Sent": hop["Sent"],
+                        "Recv": hop["Recv"],
+                        "Best_ms": hop["Best_ms"],
+                        "Avg_ms": hop["Avg_ms"],
+                        "Worst_ms": hop["Worst_ms"],
+                        "Last_ms": hop["Last_ms"],
+                        "Source_File": os.path.basename(file_path),
+                    }
+                )
+
+            df_winmtr = pd.DataFrame(data)
+
+            base_dir = os.path.join(SPECTRUM_IMAGE_ROOT, self.safe_filename(bldg))
+            os.makedirs(base_dir, exist_ok=True)
+
+            preferred_file_name = os.path.join(base_dir, f"{self.safe_filename(bldg)}.xlsx")
+            output_file_name = self.resolve_output_file(preferred_file_name)
+
+            self.set_status("Saving WinMTR to Excel...", "cyan")
+            self.save_to_excel(output_file_name, "WinMTR", df_winmtr)
+
+            self.set_status("Saving WinMTR to traceroute_hops...", "cyan")
+            db_success, db_msg = self.save_winmtr_to_supabase(df_winmtr)
+
+            result_text = (
+                f"Imported WinMTR TXT into traceroute_hops successfully\n"
+                f"{'-' * 58}\n"
+                f"File       : {file_path}\n"
+                f"Excel      : {output_file_name}\n"
+                f"Rows       : {len(df_winmtr)} hops\n"
+                f"Database   : {db_msg}\n"
+                f"{'-' * 58}\n"
+            )
+
+            for _, row in df_winmtr.iterrows():
+                result_text += (
+                    f"Hop {int(row['Hop']):<2} | {str(row['IP'])[:24]:<24} | "
+                    f"Loss {row['Loss_%']}% | "
+                    f"Sent {row['Sent']} | Recv {row['Recv']} | "
+                    f"Avg {row['Avg_ms']} ms | Worst {row['Worst_ms']} ms | Last {row['Last_ms']} ms\n"
+                )
+
+            self.set_result_text(result_text)
+
+            if db_success:
+                self.set_status("WinMTR imported and saved successfully.", "green")
+            else:
+                self.set_status("WinMTR imported to Excel, but database save failed.", "yellow")
+        except Exception as exc:
+            self.set_status("WinMTR import failed.", "red")
+            self.set_result_text(f"ERROR\n\n{str(exc)}")
+
+    # =========================
     # DATABASE
     # =========================
     def sanitize_db_value(self, value):
@@ -1007,13 +1200,52 @@ class WifiSurveyApp(ctk.CTk):
             return None
         return value
 
-    def save_to_supabase(self, df_survey, df_trace):
-        """Save survey and traceroute data to Supabase."""
+    def get_or_create_trace_survey_id(self, supabase, timestamp, building, floor, room_point, note, trace_target):
+        """Find or create a minimal survey row, then return surveys.id for traceroute_hops.survey_id."""
+        building_value = str(building or "").strip()
+        floor_value = str(floor or "").strip()
+        room_value = str(room_point or "").strip()
+        note_value = str(note or "").strip()
+        trace_target_value = str(trace_target or "").strip()
+
+        existing = (
+            supabase.table("surveys")
+            .select("id")
+            .eq("building", building_value)
+            .eq("floor", floor_value)
+            .eq("room_point", room_value)
+            .eq("note", note_value)
+            .eq("trace_target", trace_target_value)
+            .limit(1)
+            .execute()
+        )
+
+        if getattr(existing, "data", None):
+            return existing.data[0]["id"]
+
+        survey_data = {
+            "survey_timestamp": timestamp,
+            "building": building_value,
+            "floor": floor_value,
+            "room_point": room_value,
+            "note": note_value,
+            "trace_target": trace_target_value,
+        }
+
+        response = supabase.table("surveys").insert(survey_data).execute()
+        if not getattr(response, "data", None):
+            raise RuntimeError(f"Failed to create survey row for WinMTR import: {response}")
+
+        return response.data[0]["id"]
+
+    def save_to_supabase(self, df_survey, df_trace=None):
+        """Save survey data to Supabase. Traceroute is intentionally disabled; WinMTR imports handle hop data."""
         try:
             if not SUPABASE_URL or not SUPABASE_KEY:
                 return False, "❌ Supabase credentials not configured. Check .env.local file."
 
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            final_messages = []
 
             for _, row in df_survey.iterrows():
                 floor_value = self.sanitize_db_value(row.get("Floor"))
@@ -1055,7 +1287,7 @@ class WifiSurveyApp(ctk.CTk):
                     "ap_vendor": self.sanitize_db_value(row.get("AP_Vendor")),
                 }
 
-                # เช็คก่อนว่ามีข้อมูลซ้ำไหม
+                # Keep the existing duplicate check for the survey row.
                 existing = (
                     supabase.table("surveys")
                     .select("id")
@@ -1069,47 +1301,19 @@ class WifiSurveyApp(ctk.CTk):
                 )
 
                 if existing.data:
-                    # ซ้ำ → ไม่ทำอะไรเลย แจ้งเตือนอย่างเดียว
-                    self.set_status("⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ", "yellow")
-                    return True, "⚠️ ข้อมูลนี้มีอยู่แล้ว ไม่บันทึกซ้ำ"
+                    survey_id = existing.data[0]["id"]
+                    final_messages.append("Survey already exists; survey data was not duplicated.")
+                else:
+                    response = supabase.table("surveys").insert(survey_data).execute()
 
-                # ไม่ซ้ำ → insert ใหม่
-                response = supabase.table("surveys").insert(survey_data).execute()
+                    if not getattr(response, "data", None):
+                        return False, f"❌ Failed to insert survey data: {response}"
 
-                if not getattr(response, "data", None):
-                    return False, f"❌ Failed to insert survey data: {response}"
+                    survey_id = response.data[0]["id"]
+                    final_messages.append("Survey saved.")
 
-                survey_id = response.data[0]["id"]
-
-                if df_trace is not None and not df_trace.empty:
-                    trace_rows = []
-                    for _, t_row in df_trace.iterrows():
-                        trace_floor = self.sanitize_db_value(t_row.get("Floor"))
-                        trace_room = self.sanitize_db_value(t_row.get("Room_Point"))
-                        hop_value = self.sanitize_db_value(t_row.get("Hop"))
-
-                        trace_rows.append(
-                            {
-                                "survey_id": survey_id,
-                                "survey_timestamp": self.sanitize_db_value(t_row.get("Timestamp")),
-                                "building": self.sanitize_db_value(t_row.get("Building")),
-                                "floor": str(trace_floor) if trace_floor is not None else None,
-                                "room_point": str(trace_room) if trace_room is not None else None,
-                                "hop": int(hop_value) if hop_value is not None else None,
-                                "ip": self.sanitize_db_value(t_row.get("IP")),
-                                "loss_pct": self.sanitize_db_value(t_row.get("Loss_%")),
-                                "min_ms": self.sanitize_db_value(t_row.get("Min_ms")),
-                                "max_ms": self.sanitize_db_value(t_row.get("Max_ms")),
-                                "avg_ms": self.sanitize_db_value(t_row.get("Avg_ms")),
-                            }
-                        )
-
-                    if trace_rows:
-                        trace_response = supabase.table("traceroute_hops").insert(trace_rows).execute()
-                        if getattr(trace_response, "data", None) is None:
-                            return False, f"❌ Failed to insert trace data: {trace_response}"
-
-            return True, "✅ Saved to Supabase successfully!"
+            message = "✅ Saved to Supabase successfully! " + " ".join(final_messages)
+            return True, message
         except Exception as e:
             print("SUPABASE ERROR:", e)
             return False, f"❌ Supabase Error: {str(e)}"
@@ -1124,12 +1328,12 @@ class WifiSurveyApp(ctk.CTk):
 
         payload = {
             "server_ip": self.entry_server_ip.get().strip() or SERVER_IP,
+            # Kept only as metadata for WinMTR imports / Raw_Data.
             "trace_ip": self.entry_trace_ip.get().strip() or (self.entry_server_ip.get().strip() or SERVER_IP),
             "bldg": self.entry_bldg.get().strip(),
             "floor": self.entry_floor.get().strip(),
             "room": self.entry_room.get().strip(),
             "note": self.entry_note.get().strip(),
-            "diag_mode": self.combo_diag_mode.get(),
         }
 
         if not payload["server_ip"] or not payload["bldg"] or not payload["floor"] or not payload["room"]:
@@ -1159,8 +1363,6 @@ class WifiSurveyApp(ctk.CTk):
         floor = payload["floor"]
         room = payload["room"]
         note = payload["note"]
-        diag_mode = payload["diag_mode"]
-
         self.set_status("Collecting Wi-Fi interface details...", "cyan")
         wlan = self.get_wlan_info()
 
@@ -1195,25 +1397,6 @@ class WifiSurveyApp(ctk.CTk):
             udp_mbps, jitter_ms, packet_loss_pct = self.parse_iperf_udp(udp_data)
         except Exception as exc:
             udp_error = str(exc)
-
-        if "Detailed" in diag_mode:
-            resolve_hostname = True
-            ping_count = 10
-        else:
-            resolve_hostname = False
-            ping_count = 5
-
-        self.set_status(f"Collecting traceroute snapshot to {trace_ip}...", "cyan")
-        try:
-            tracert_hops = self.run_pingplotter_style(
-                trace_ip,
-                max_hops=MAX_HOPS,
-                timeout_ms=TRACERT_TIMEOUT,
-                ping_count=ping_count,
-                resolve_hostname=resolve_hostname,
-            )
-        except Exception:
-            tracert_hops = []
 
         self.set_status("Scanning nearby Wi-Fi for spectrum...", "cyan")
         self.scan_wifi_live()
@@ -1303,34 +1486,8 @@ class WifiSurveyApp(ctk.CTk):
         self.set_status(f"Saving {DEFAULT_SHEET_NAME} to Excel...", "cyan")
         self.save_to_excel(output_file_name, DEFAULT_SHEET_NAME, df)
 
-        df_trace = None
-        if tracert_hops:
-            tracert_data = []
-            for hop in tracert_hops:
-                tracert_data.append(
-                    {
-                        "Timestamp": timestamp,
-                        "Building": bldg,
-                        "Floor": floor,
-                        "Room_Point": room,
-                        "Hop": hop["Hop"],
-                        "Hostname": hop.get("Hostname", ""),
-                        "IP": hop["IP"],
-                        "Loss_%": hop.get("Loss_%"),
-                        "RTT1": hop.get("RTT1", "*"),
-                        "RTT2": hop.get("RTT2", "*"),
-                        "RTT3": hop.get("RTT3", "*"),
-                        "Min_ms": hop.get("Min"),
-                        "Max_ms": hop.get("Max"),
-                        "Avg_ms": hop.get("Avg"),
-                    }
-                )
-            df_trace = pd.DataFrame(tracert_data)
-            self.set_status("Saving TraceRoute to Excel...", "cyan")
-            self.save_to_excel(output_file_name, "TraceRoute", df_trace)
-
         self.set_status("Saving to Supabase Database...", "cyan")
-        db_success, db_msg = self.save_to_supabase(df, df_trace)
+        db_success, db_msg = self.save_to_supabase(df, None)
         db_status_text = db_msg if not db_success else "✅ Saved to Supabase"
 
         return {
@@ -1356,7 +1513,6 @@ class WifiSurveyApp(ctk.CTk):
             "snr_quality": snr_quality,
             "rating": rating,
             "ap_vendor": ap_vendor,
-            "tracert_hops": tracert_hops,
             "file_name": output_file_name,
             "db_status": db_status_text,
             "image_name": image_name,
@@ -1365,24 +1521,6 @@ class WifiSurveyApp(ctk.CTk):
         }
 
     def _handle_test_success(self, result):
-        trace_str = ""
-        tracert_hops = result["tracert_hops"]
-
-        if tracert_hops:
-            trace_str = "  [PingPlotter-style Snapshot]\n"
-            trace_str += "   Hop | IP              | Hostname        | Loss% | Min/Max/Avg (ms)\n"
-            for hop in tracert_hops:
-                loss = f"{hop['Loss_%']}%" if hop.get("Loss_%") is not None else "-"
-                min_ms = hop.get("Min") if hop.get("Min") is not None else "-"
-                max_ms = hop.get("Max") if hop.get("Max") is not None else "-"
-                avg_ms = hop.get("Avg") if hop.get("Avg") is not None else "-"
-                host_disp = (hop.get("Hostname") or "")[:15]
-                trace_str += (
-                    f"   {hop['Hop']:<3} | {hop['IP']:<15} | {host_disp:<15} | "
-                    f"{loss:<5} | {min_ms}/{max_ms}/{avg_ms}\n"
-                )
-            trace_str += f"{'-' * 74}\n"
-
         wlan = result["wlan"]
         udp_error = result.get("udp_error")
         udp_actual_display = result["udp_mbps"] if result["udp_mbps"] is not None else "N/A"
@@ -1428,7 +1566,6 @@ class WifiSurveyApp(ctk.CTk):
             f"  Strongest AP    : {cq.get('Strongest_Neighbor_RSSI', -100)} dBm\n"
             f"  Spectrum Image  : {result.get('image_path', '-')}\n"
             f"{'-' * 58}\n"
-            f"{trace_str}"
             f"  Rating          : {result['rating']}\n"
             f"  Database        : {result.get('db_status', 'Unknown')}\n"
             f"{'=' * 58}\n"
@@ -1438,8 +1575,8 @@ class WifiSurveyApp(ctk.CTk):
             result_text += f"\nUDP Warning:\n{udp_error}\n"
 
         self.set_result_text(result_text)
-        self.entry_room.delete(0, "end")
-        self.entry_note.delete(0, "end")
+        # Keep Building / Floor / Room / Note after a test so the same survey point
+        # can be reused for WinMTR import without typing it again.
 
         if result["file_name"].endswith(".xlsx") and "_autosave_" in result["file_name"]:
             self.set_status("Test finished. Original workbook was busy, so data was saved to an autosave file.", "yellow")

@@ -1019,7 +1019,11 @@ class WifiSurveyApp(ctk.CTk):
         return rows
 
     def save_winmtr_to_supabase(self, df_winmtr):
-        """Upsert WinMTR hop data into public.traceroute_hops."""
+        """Insert WinMTR hop data into public.traceroute_hops.
+        
+        For duplicate prevention: delete old records with the same 
+        (building, floor, room_point, trace_target, hop_no, ip) before inserting new ones.
+        """
         try:
             if not SUPABASE_URL or not SUPABASE_KEY:
                 return False, "❌ Supabase credentials not configured. Check .env.local file."
@@ -1041,6 +1045,10 @@ class WifiSurveyApp(ctk.CTk):
             )
 
             rows = []
+            building_val = self.sanitize_db_value(first_row.get("Building"))
+            floor_val = self.sanitize_db_value(first_row.get("Floor"))
+            room_val = self.sanitize_db_value(first_row.get("Room_Point"))
+            trace_target_val = self.sanitize_db_value(first_row.get("Trace_Target"))
 
             for _, row in df_winmtr.iterrows():
                 floor_value = self.sanitize_db_value(row.get("Floor"))
@@ -1072,14 +1080,26 @@ class WifiSurveyApp(ctk.CTk):
                     }
                 )
 
-            response = (
-                supabase.table("traceroute_hops")
-                .upsert(
-                    rows,
-                    on_conflict="building,floor,room_point,trace_target,hop_no,ip",
-                )
-                .execute()
-            )
+            # Delete old records with same (building, floor, room_point, note, trace_target, hop_no, ip)
+            # This only deletes if note is identical. Different notes will be kept as separate records.
+            for _, row in df_winmtr.iterrows():
+                hop_no_val = int(row.get("Hop"))
+                ip_val = self.sanitize_db_value(row.get("IP"))
+                ip_text = str(ip_val).strip() if ip_val is not None else "Unknown"
+                note_val = self.sanitize_db_value(row.get("Note"))
+                
+                supabase.table("traceroute_hops").delete()\
+                    .eq("building", building_val or "")\
+                    .eq("floor", floor_val or "")\
+                    .eq("room_point", room_val or "")\
+                    .eq("note", note_val or "")\
+                    .eq("trace_target", trace_target_val or "")\
+                    .eq("hop_no", hop_no_val)\
+                    .eq("ip", ip_text)\
+                    .execute()
+
+            # Insert new records
+            response = supabase.table("traceroute_hops").insert(rows).execute()
 
             if getattr(response, "data", None) is None:
                 return False, f"❌ Failed to save WinMTR data into traceroute_hops: {response}"
@@ -1201,13 +1221,19 @@ class WifiSurveyApp(ctk.CTk):
         return value
 
     def get_or_create_trace_survey_id(self, supabase, timestamp, building, floor, room_point, note, trace_target):
-        """Find or create a minimal survey row, then return surveys.id for traceroute_hops.survey_id."""
+        """Find or create a minimal survey row, then return surveys.id for traceroute_hops.survey_id.
+        
+        For WinMTR imports: each unique combination of (building, floor, room_point, note) gets a separate ID,
+        regardless of trace_target. This allows same location with different notes to have different survey records.
+        """
         building_value = str(building or "").strip()
         floor_value = str(floor or "").strip()
         room_value = str(room_point or "").strip()
         note_value = str(note or "").strip()
         trace_target_value = str(trace_target or "").strip()
 
+        # Query for existing survey using only building, floor, room_point, and note
+        # This ensures different notes create separate survey records for the same location
         existing = (
             supabase.table("surveys")
             .select("id")
@@ -1215,7 +1241,6 @@ class WifiSurveyApp(ctk.CTk):
             .eq("floor", floor_value)
             .eq("room_point", room_value)
             .eq("note", note_value)
-            .eq("trace_target", trace_target_value)
             .limit(1)
             .execute()
         )
